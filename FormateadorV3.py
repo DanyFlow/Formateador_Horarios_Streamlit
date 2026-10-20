@@ -409,20 +409,16 @@ with tab_util:
 import base64
 import streamlit as st
 
-# Enlace directo adaptado a partir de tu ID de Google Drive
-url_imagen_drive = (
-    "https://lh3.googleusercontent.com/d/1uqXeCGgBghAjmqj3pXqK-HdCrRybQiQL"
-)
-enlace_perfil = "https://share.streamlit.io/user/danyflow"
+# ------- Firma flotante en la esquina inferior izquierda
+url_imagen_drive = "https://lh3.googleusercontent.com/d/1uqXeCGgBghAjmqj3pXqK-HdCrRybQiQL"
+enlace_perfil = "https://share.streamlit.io/user/danyflowt"
 
-# HTML y CSS con el icono flotante centrado en la página
 firma_html = f"""
 <style>
 .firma-flotante-link {{
     position: fixed;
     bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 20px;
     z-index: 999999;
     text-decoration: none;
 }}
@@ -430,9 +426,9 @@ firma_html = f"""
 .firma-flotante {{
     display: flex;
     align-items: center;
-    background: #06b6d4; /* Color cyan */
+    background: #06b6d4;
     color: #ffffff;
-    width: 44px; /* Tamaño contraído (círculo perfecto al centro) */
+    width: 44px;
     height: 44px;
     padding: 6px;
     border-radius: 50px;
@@ -446,7 +442,6 @@ firma_html = f"""
     white-space: nowrap;
 }}
 
-/* Estado expandido: se adapta al texto y crece simétricamente desde el centro */
 .firma-flotante:hover {{
     width: max-content; 
     background: #0891b2; 
@@ -495,11 +490,10 @@ firma_html = f"""
         <img src="{url_imagen_drive}" alt="Dany FloVel">
         <div class="firma-texto">
             <span class="firma-titulo">Dany FloVel</span>
-            <span class="firma-sub"> ⚡ Ver perfil ⚡</span>
+            <span class="firma-sub">⚡ Ver perfil ⚡</span>
         </div>
     </div>
 </a>
 """
 
-# Renderizar en la aplicación
 st.markdown(firma_html, unsafe_allow_html=True)
