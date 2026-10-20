@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guía de Uso — Formateador y Procesador de Horarios</title>
+  <style>
+    :root {
+      --primary: #0284c7;
+      --primary-hover: #0369a1;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #334155;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --code-bg: #0f172a;
+      --code-text: #f8fafc;
+      --accent-green: #10b981;
+      --accent-orange: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      color: white;
+      padding: 2.5rem 2rem;
+      border-radius: 1rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+
+    header h1 {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+    }
+
+    header p {
+      opacity: 0.9;
+      font-size: 1.05rem;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.75rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    }
+
+    .card h2 {
+      color: var(--primary);
+      font-size: 1.35rem;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 0.5rem;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.6rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 9999px;
+      text-transform: uppercase;
+    }
+
+    .badge-primary { background-color: #e0f2fe; color: #0369a1; }
+    .badge-success { background-color: #d1fae5; color: #047857; }
+    .badge-warning { background-color: #fef3c7; color: #b45309; }
+
+    ol, ul {
+      padding-left: 1.5rem;
+      margin-bottom: 1rem;
+    }
+
+    li {
+      margin-bottom: 0.5rem;
+    }
+
+    .tip-box {
+      background-color: #f0fdf4;
+      border-left: 4px solid var(--accent-green);
+      padding: 1rem;
+      border-radius: 0.375rem;
+      margin-top: 1rem;
+      font-size: 0.95rem;
+    }
+
+    .warn-box {
+      background-color: #fffbeb;
+      border-left: 4px solid var(--accent-orange);
+      padding: 1rem;
+      border-radius: 0.375rem;
+      margin-top: 1rem;
+      font-size: 0.95rem;
+    }
+
+    footer {
+      text-align: center;
+      padding: 2rem 0 1rem;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>📋 Manual de Uso — Formateador de Horarios</h1>
+      <p>Guía de operación de la aplicación web y utilidades administrativas</p>
+    </header>
+
+    <!-- PESTAÑA PRINCIPAL -->
+    <div class="card">
+      <h2>1. Flujo Principal: Generación de Reporte de Horarios <span class="badge badge-primary">Pestaña 1</span></h2>
+      <p>Procesa los reportes de horarios del personal activo e inactivo y realiza el cruce automatizado con la base de datos MySQL.</p>
+      
+      <ol>
+        <li><strong>Carga de archivos:</strong>
+          <ul>
+            <li><code>Horarios ACTIVO</code> (Obligatorio · Excel .xlsx)</li>
+            <li><code>Horarios EN FIRMA</code> (Opcional · Excel .xlsx)</li>
+            <li><code>Export de MySQL</code> (Obligatorio · Excel .xlsx o .csv con tarjeta en Columna A)</li>
+          </ul>
+        </li>
+        <li>Presiona el botón <strong>Procesar</strong>.</li>
+        <li><strong>Revisión y Edición:</strong> Ajusta los horarios marcados bajo el turno <code>REVISAR</code> utilizando el editor interactivo y haz clic en <strong>Aplicar cambios y reevaluar turnos</strong>.</li>
+        <li><strong>Descarga:</strong> Haz clic en <strong>Generar archivo final</strong> y descarga tu reporte consolidado en <code>.xlsx</code>.</li>
+      </ol>
+    </div>
+
+    <!-- UTILIDADES -->
+    <div class="card">
+      <h2>2. Módulo de Utilidades Independientes <span class="badge badge-primary">Pestaña 2</span></h2>
+      <p>Herramientas auxiliares especializadas para optimizar, filtrar y limpiar datos:</p>
+
+      <div style="margin-top: 1.25rem;">
+        <h3>🔹 Corrector de Conversión Nitro (PDF → Excel)</h3>
+        <p>Corrige la omisión de la primera línea de empleado generada en cada salto de página tras convertir reportes PDF a Excel mediante Nitro PDF.</p>
+        <ul>
+          <li>Sube el PDF original y el Excel convertido.</li>
+          <li>Descarga el Excel reestructurado manteniendo el formato visual original.</li>
+        </ul>
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <h3>🔹 Agrupar Empleados por Tipo de Horario</h3>
+        <p>Organiza automáticamente las filas del reporte final clasificando y reuniendo a los empleados con el mismo horario en una sola hoja (<code>AGRUPADO</code>) agregando el identificador del turno.</p>
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <h3>🔹 Obtener Personal EN FIRMA</h3>
+        <p>Cruza el personal inactivo del sistema MySQL con el reporte de la quincena para extraer automáticamente la lista que debe integrarse manualmente a Inspector.</p>
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <h3>🔹 Buscar «gua» en Exportado del Sistema</h3>
+        <p>Filtra y copia las columnas A a D de las filas cuyo contenido coincida con el texto de búsqueda (por defecto "gua").</p>
+      </div>
+
+      <div style="margin-top: 1.25rem;">
+        <h3>🔹 Dar Formato Necesario a la Quincena</h3>
+        <p>Reacomoda la disposición de columnas de los reportes quincenales del origen A:U al formato de destino E:X.</p>
+      </div>
+
+      <!-- NUEVA UTILIDAD -->
+      <div style="margin-top: 1.25rem; border-top: 1px dashed var(--border); padding-top: 1rem;">
+        <h3><span class="badge badge-success">Nuevo</span> Filtrar Archivo Final por Pago en Quincenas</h3>
+        <p>Verifica la vigencia y estatus de pago de los empleados contenidos en el archivo final o agrupado comparándolos contra las listas quincenales.</p>
+        
+        <ul>
+          <li><strong>Carga de archivos:</strong>
+            <ul>
+              <li><code>Quincena 1</code> (Obligatorio · Excel .xlsx)</li>
+              <li><code>Quincena 2</code> (Opcional · Excel .xlsx)</li>
+              <li><code>Archivo Final o Agrupado</code> (Obligatorio · Excel .xlsx)</li>
+            </ul>
+          </li>
+          <li><strong>Lógica de filtro:</strong> Evalúa la tarjeta ubicada en la <strong>Columna B</strong> del archivo final contra la <strong>Columna A</strong> de la Quincena 1. Si no se encuentra en Q1 y se proporcionó Q2, realiza una segunda búsqueda en Q2.</li>
+          <li><strong>Resultado:</strong> Conserva únicamente a los empleados con coincidencia en pago y omite a los no encontrados.</li>
+        </ul>
+
+        <div class="tip-box">
+          <strong>💡 Consejo de uso:</strong> Si solo necesitas validar contra una sola quincena, deja el campo de la Quincena 2 vacío; la aplicación procesará el filtro únicamente contra la Quincena 1.
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      Diseñado para la administración y control de asistencia · Dany FloVel ⚡
+    </footer>
+  </div>
+
+</body>
+</html>
