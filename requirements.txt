@@ -1,0 +1,8 @@
+streamlit>=1.36
+pandas>=2.0
+openpyxl>=3.1
+xlrd>=2.0
+pyxlsb>=1.0
+pypdf>=1.0
+pdfplumber>=1.0
+mysql-connector-python>=1.0
