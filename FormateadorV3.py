@@ -411,7 +411,7 @@ import streamlit as st
 
 # ------- Firma flotante en la esquina superior izquierda
 url_imagen_drive = "https://i.redd.it/snoovatar/avatars/98e5bfa6-95f3-46d8-8754-7a64c0099533.png"
-enlace_perfil = "https://share.streamlit.io/user/danyflowt"
+enlace_perfil = "https://share.streamlit.io/user/danyflow"
 
 firma_html = f"""
 <style>
