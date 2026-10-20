@@ -1060,6 +1060,82 @@ def util_agrupar_horarios(archivo):
   return buf.getvalue(), resumen, avisos, len(filas)
 
 
+def util_filtrar_por_quincenas(f_q1, f_q2, f_final):
+  """Filtra el archivo final conservando formatos y estilos originales,
+  comparando la columna B contra la columna A de la Quincena 1 y opcionalmente Q2.
+  """
+  df_q1 = pd.read_excel(f_q1, sheet_name=0, dtype=object)
+  set_q1 = set(df_q1.iloc[:, 0].dropna().map(clave))
+
+  set_q2 = set()
+  if f_q2 is not None:
+    df_q2 = pd.read_excel(f_q2, sheet_name=0, dtype=object)
+    set_q2 = set(df_q2.iloc[:, 0].dropna().map(clave))
+
+  if hasattr(f_final, "seek"):
+    f_final.seek(0)
+  wb_orig = load_workbook(f_final, data_only=True)
+  ws_orig = wb_orig.active
+
+  if ws_orig.max_row < 2:
+    raise ValueError("El archivo final no tiene filas de datos.")
+
+  wb_new = Workbook()
+  ws_new = wb_new.active
+  ws_new.title = "FILTRADO_QUINCENAS"
+
+  # 1. Copiar encabezado (fila 1) con estilos
+  for col_c in range(1, ws_orig.max_column + 1):
+    src_cell = ws_orig.cell(row=1, column=col_c)
+    dest_cell = ws_new.cell(row=1, column=col_c, value=src_cell.value)
+    if src_cell.has_style:
+      dest_cell.font = copy.copy(src_cell.font)
+      dest_cell.fill = copy.copy(src_cell.fill)
+      dest_cell.border = copy.copy(src_cell.border)
+      dest_cell.alignment = copy.copy(src_cell.alignment)
+      dest_cell.number_format = copy.copy(src_cell.number_format)
+
+  filas_copiadas = 0
+  total_filas = 0
+  new_row_idx = 2
+
+  # 2. Filtrar y copiar filas manteniendo formatos originales
+  for r in range(2, ws_orig.max_row + 1):
+    if all(es_vacio(ws_orig.cell(r, c).value) for c in range(1, ws_orig.max_column + 1)):
+      continue
+    total_filas += 1
+
+    # Columna B del archivo final (índice 2, o columna 2)
+    val_b = ws_orig.cell(r, 2).value
+    k_emp = clave(val_b)
+
+    encontrado = False
+    if k_emp and k_emp in set_q1:
+      encontrado = True
+    elif k_emp and k_emp in set_q2:
+      encontrado = True
+
+    if encontrado:
+      filas_copiadas += 1
+      for col_c in range(1, ws_orig.max_column + 1):
+        src_cell = ws_orig.cell(row=r, column=col_c)
+        dest_cell = ws_new.cell(row=new_row_idx, column=col_c, value=src_cell.value)
+        if src_cell.has_style:
+          dest_cell.font = copy.copy(src_cell.font)
+          dest_cell.fill = copy.copy(src_cell.fill)
+          dest_cell.border = copy.copy(src_cell.border)
+          dest_cell.alignment = copy.copy(src_cell.alignment)
+          dest_cell.number_format = copy.copy(src_cell.number_format)
+      new_row_idx += 1
+
+  for col_letter, dim in ws_orig.column_dimensions.items():
+    ws_new.column_dimensions[col_letter].width = dim.width
+
+  ws_new.freeze_panes = "A2"
+  buf = io.BytesIO()
+  wb_new.save(buf)
+  return buf.getvalue(), filas_copiadas, total_filas
+
 # --------------------------------------------------------------------------
 # Archivo de la quincena (lo usa la utilidad «Obtener personal EN FIRMA»)
 # --------------------------------------------------------------------------
