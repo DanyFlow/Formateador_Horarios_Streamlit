@@ -409,15 +409,15 @@ with tab_util:
 import base64
 import streamlit as st
 
-# ------- Firma flotante en la esquina inferior izquierda
-url_imagen_drive = "https://i.redd.it/snoovatar/avatars/98e5bfa6-95f3-46d8-8754-7a64c0099533.png"
+# ------- Firma flotante en la esquina superior izquierda
+url_imagen_drive = "https://lh3.googleusercontent.com/d/1uqXeCGgBghAjmqj3pXqK-HdCrRybQiQL"
 enlace_perfil = "https://share.streamlit.io/user/danyflowt"
 
 firma_html = f"""
 <style>
 .firma-flotante-link {{
     position: fixed;
-    bottom: 20px;
+    top: 20px;
     left: 20px;
     z-index: 999999;
     text-decoration: none;
