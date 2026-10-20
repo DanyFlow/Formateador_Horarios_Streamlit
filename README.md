@@ -1,6 +1,6 @@
 # 🕒 Formateador y Procesador de Horarios (Streamlit)
 
-Aplicación web desarrollada en **Python** y **Streamlit** diseñada para automatizar la limpieza, estructuración, corrección de saltos de página en reportes PDF masivos generados con Inspector de la SSJ y agrupación de turnos en archivos de Excel administrativos para recursos humanos.
+Aplicación web desarrollada en **Python** y **Streamlit** diseñada para automatizar la limpieza, estructuración, corrección de saltos de página en reportes PDF masivos generados con el software Inspector y agrupación de turnos en archivos de Excel administrativos para recursos humanos.
 
 ---
 
