@@ -410,7 +410,7 @@ import base64
 import streamlit as st
 
 # ------- Firma flotante en la esquina inferior izquierda
-url_imagen_drive = "https://lh3.googleusercontent.com/d/1uqXeCGgBghAjmqj3pXqK-HdCrRybQiQL"
+url_imagen_drive = "https://drive.google.com/file/d/1oCCVTyUfMABigBHvsnSGwfOof8gxKFaV/view?usp=sharing"
 enlace_perfil = "https://share.streamlit.io/user/danyflowt"
 
 firma_html = f"""
