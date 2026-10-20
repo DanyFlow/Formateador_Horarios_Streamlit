@@ -219,6 +219,41 @@ with tab_util:
 
   st.divider()
 
+# ---- Filtrar archivo final por quincenas
+  st.subheader("Filtrar archivo final por pago en quincenas")
+  st.caption(
+      "Compara la columna B del archivo final contra la columna A de la Quincena 1 y, "
+      "si se proporciona, contra la Quincena 2. Genera un nuevo archivo con sus formatos "
+      "originales omitiendo a los empleados que no aparezcan en las quincenas."
+  )
+  uf_q1 = st.file_uploader("Archivo de Quincena 1 (Hoja1)", type=["xlsx"], key="uf_q1")
+  uf_q2 = st.file_uploader("Archivo de Quincena 2 (Hoja1) — opcional", type=["xlsx"], key="uf_q2")
+  uf_fin = st.file_uploader("Archivo Final o Agrupado", type=["xlsx"], key="uf_fin")
+
+  if st.button("Filtrar por quincenas", key="uf_btn", disabled=not (uf_q1 and uf_fin)):
+    try:
+      with st.spinner("Procesando y filtrando registros..."):
+        bytes_uf, copiadas, total = p.util_filtrar_por_quincenas(uf_q1, uf_q2, uf_fin)
+        _guardar("uf_res", (bytes_uf, copiadas, total))
+    except ValueError as e:
+      st.error(str(e))
+    except Exception as e:
+      st.error(f"No pude procesar los archivos: {e}")
+
+  if "uf_res" in st.session_state:
+    bytes_uf, copiadas, total = st.session_state["uf_res"]
+    st.success(
+        f"¡Filtrado completado con éxito! Se conservaron {copiadas} de {total} empleados "
+        f"(se omitieron {total - copiadas} registros sin coincidencia en las quincenas)."
+    )
+    st.download_button(
+        "Descargar archivo filtrado",
+        bytes_uf,
+        file_name="REPORTE_FILTRADO_QUINCENAS.xlsx",
+        mime=XLSX,
+        key="uf_dl",
+    )
+
   # ---- Agrupar empleados por tipo de horario
   st.subheader("Agrupar empleados por tipo de horario")
   st.caption(
@@ -266,6 +301,8 @@ with tab_util:
     )
 
   st.divider()
+
+  
 
   # ---- Obtener personal en firma (macro 2)
   st.subheader("Obtener personal EN FIRMA")
