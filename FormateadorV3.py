@@ -413,7 +413,7 @@ import streamlit as st
 url_imagen_drive = (
     "https://lh3.googleusercontent.com/d/1uqXeCGgBghAjmqj3pXqK-HdCrRybQiQL"
 )
-enlace_perfil = "https://share.streamlit.io/user/danyflowt"
+enlace_perfil = "https://share.streamlit.io/user/danyflow"
 
 # HTML y CSS con el icono flotante centrado en la página
 firma_html = f"""
