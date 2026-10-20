@@ -404,3 +404,101 @@ with tab_util:
         mime=XLSX,
         key="u9_dl",
     )
+
+# -------Firma
+import base64
+import streamlit as st
+
+# Enlace directo adaptado a partir de tu ID de Google Drive
+url_imagen_drive = (
+    "https://lh3.googleusercontent.com/d/1uqXeCGgBghAjmqj3pXqK-HdCrRybQiQL"
+)
+enlace_perfil = "https://share.streamlit.io/user/danyflowt"
+
+# HTML y CSS con expansión dinámica ajustada al tamaño del texto
+firma_html = f"""
+<style>
+.firma-flotante-link {{
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 999999;
+    text-decoration: none;
+}}
+
+.firma-flotante {{
+    display: flex;
+    align-items: center;
+    background: #06b6d4; /* Color cyan */
+    color: #ffffff;
+    width: 44px; /* Tamaño contraído (círculo perfecto) */
+    height: 44px;
+    padding: 6px;
+    border-radius: 50px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    border: 1px solid #0891b2;
+    font-family: var(--font, sans-serif);
+    font-size: 13px;
+    overflow: hidden;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease, background 0.3s ease, padding 0.3s ease;
+    cursor: pointer;
+    white-space: nowrap;
+}}
+
+/* Estado expandido: se adapta automáticamente al texto */
+.firma-flotante:hover {{
+    width: max-content; /* Se ajusta exactamente al contenido de las letras */
+    background: #0891b2; 
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+    padding-right: 16px; /* Espacio estético al final del texto */
+}}
+
+.firma-flotante img {{
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 1.5px solid rgba(255, 255, 255, 0.9);
+}}
+
+.firma-texto {{
+    margin-left: 12px; /* Separación limpia respecto al icono */
+    opacity: 0;
+    transition: opacity 0.25s ease 0.1s;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: left;
+    line-height: 1.3;
+}}
+
+.firma-flotante:hover .firma-texto {{
+    opacity: 1;
+}}
+
+.firma-titulo {{
+    font-weight: 600;
+    font-size: 12px;
+    color: #ffffff;
+}}
+
+.firma-sub {{
+    font-size: 10px;
+    color: #ecfeff;
+}}
+</style>
+
+<a href="{enlace_perfil}" target="_blank" class="firma-flotante-link" title="Visitar perfil de Streamlit">
+    <div class="firma-flotante">
+        <img src="{url_imagen_drive}" alt="Dany FloVel">
+        <div class="firma-texto">
+            <span class="firma-titulo">By Dany FloVel</span>
+            <span class="firma-sub">   ⚡ Ver perfil ⚡</span>
+        </div>
+    </div>
+</a>
+"""
+
+# Renderizar en la aplicación
+st.markdown(firma_html, unsafe_allow_html=True)
