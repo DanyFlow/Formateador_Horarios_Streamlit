@@ -415,13 +415,14 @@ url_imagen_drive = (
 )
 enlace_perfil = "https://share.streamlit.io/user/danyflowt"
 
-# HTML y CSS con expansión dinámica ajustada al tamaño del texto
+# HTML y CSS con el icono flotante centrado en la página
 firma_html = f"""
 <style>
 .firma-flotante-link {{
     position: fixed;
     bottom: 20px;
-    right: 20px;
+    left: 50%;
+    transform: translateX(-50%);
     z-index: 999999;
     text-decoration: none;
 }}
@@ -431,11 +432,11 @@ firma_html = f"""
     align-items: center;
     background: #06b6d4; /* Color cyan */
     color: #ffffff;
-    width: 44px; /* Tamaño contraído (círculo perfecto) */
+    width: 44px; /* Tamaño contraído (círculo perfecto al centro) */
     height: 44px;
     padding: 6px;
     border-radius: 50px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
     border: 1px solid #0891b2;
     font-family: var(--font, sans-serif);
     font-size: 13px;
@@ -445,12 +446,12 @@ firma_html = f"""
     white-space: nowrap;
 }}
 
-/* Estado expandido: se adapta automáticamente al texto */
+/* Estado expandido: se adapta al texto y crece simétricamente desde el centro */
 .firma-flotante:hover {{
-    width: max-content; /* Se ajusta exactamente al contenido de las letras */
+    width: max-content; 
     background: #0891b2; 
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
-    padding-right: 16px; /* Espacio estético al final del texto */
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    padding-right: 16px; 
 }}
 
 .firma-flotante img {{
@@ -463,7 +464,7 @@ firma_html = f"""
 }}
 
 .firma-texto {{
-    margin-left: 12px; /* Separación limpia respecto al icono */
+    margin-left: 12px;
     opacity: 0;
     transition: opacity 0.25s ease 0.1s;
     display: flex;
@@ -493,8 +494,8 @@ firma_html = f"""
     <div class="firma-flotante">
         <img src="{url_imagen_drive}" alt="Dany FloVel">
         <div class="firma-texto">
-            <span class="firma-titulo">By Dany FloVel</span>
-            <span class="firma-sub">   ⚡ Ver perfil ⚡</span>
+            <span class="firma-titulo">Dany FloVel</span>
+            <span class="firma-sub"> ⚡ Ver perfil ⚡</span>
         </div>
     </div>
 </a>
