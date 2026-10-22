@@ -1059,18 +1059,62 @@ def util_agrupar_horarios(archivo):
   wn.save(buf)
   return buf.getvalue(), resumen, avisos, len(filas)
 
-
 def util_filtrar_por_quincenas(f_q1, f_q2, f_final):
   """Filtra el archivo final conservando formatos y estilos originales,
-  comparando la columna B contra la columna A de la Quincena 1 y opcionalmente Q2.
+  comparando la columna B contra la columna A de la Quincena 1 y opcionalmente Q2,
+  y copia las columnas PUESTO, DESCR, TIPOTRAB, RAMA y REGION a partir de la columna Z.
   """
-  df_q1 = pd.read_excel(f_q1, sheet_name=0, dtype=object)
-  set_q1 = set(df_q1.iloc[:, 0].dropna().map(clave))
+  def _cargar_datos_quincena(archivo):
+    if archivo is None:
+      return {}
+    if hasattr(archivo, "seek"):
+      archivo.seek(0)
+    wb_q = load_workbook(archivo, data_only=True)
+    ws_q = wb_q.active
+    
+    idx_enc = None
+    cols_map = {}
+    target_headers = ["PUESTO", "DESCR", "TIPOTRAB", "RAMA", "REGION"]
+    
+    # Buscar dinámicamente la fila de encabezados y las columnas requeridas
+    for r in range(1, min(15, ws_q.max_row + 1)):
+      row_vals = [ws_q.cell(r, c).value for c in range(1, ws_q.max_column + 1)]
+      row_strs = [str(v).strip().upper() if v is not None else "" for v in row_vals]
+      if "TARJETA" in row_strs:
+        idx_enc = r
+        for idx_c, val in enumerate(row_strs, start=1):
+          if val == "TARJETA":
+            cols_map["TARJETA"] = idx_c
+          elif val in target_headers:
+            cols_map[val] = idx_c
+        break
+        
+    if idx_enc is None or "TARJETA" not in cols_map:
+      idx_enc = 1
+      cols_map["TARJETA"] = 1
+      for c in range(1, ws_q.max_column + 1):
+        v = str(ws_q.cell(1, c).value or "").strip().upper()
+        if v in target_headers:
+          cols_map[v] = c
 
-  set_q2 = set()
-  if f_q2 is not None:
-    df_q2 = pd.read_excel(f_q2, sheet_name=0, dtype=object)
-    set_q2 = set(df_q2.iloc[:, 0].dropna().map(clave))
+    datos_quin = {}
+    for r in range(idx_enc + 1, ws_q.max_row + 1):
+      t_val = ws_q.cell(r, cols_map["TARJETA"]).value
+      k = clave(t_val)
+      if not k:
+        continue
+      
+      info = {}
+      for h in target_headers:
+        col_idx = cols_map.get(h)
+        info[h] = ws_q.cell(r, col_idx).value if col_idx else None
+      datos_quin[k] = info
+      
+    return datos_quin
+
+  # Cargar datos dinámicos de las quincenas
+  q1_dict = _cargar_datos_quincena(f_q1)
+  q2_dict = _cargar_datos_quincena(f_q2) if f_q2 is not None else {}
 
   if hasattr(f_final, "seek"):
     f_final.seek(0)
@@ -1084,8 +1128,9 @@ def util_filtrar_por_quincenas(f_q1, f_q2, f_final):
   ws_new = wb_new.active
   ws_new.title = "FILTRADO_QUINCENAS"
 
-  # 1. Copiar encabezado (fila 1) con estilos
-  for col_c in range(1, ws_orig.max_column + 1):
+  max_col_orig = ws_orig.max_column
+  # 1. Copiar encabezado original (fila 1) con estilos
+  for col_c in range(1, max_col_orig + 1):
     src_cell = ws_orig.cell(row=1, column=col_c)
     dest_cell = ws_new.cell(row=1, column=col_c, value=src_cell.value)
     if src_cell.has_style:
@@ -1093,31 +1138,40 @@ def util_filtrar_por_quincenas(f_q1, f_q2, f_final):
       dest_cell.fill = copy.copy(src_cell.fill)
       dest_cell.border = copy.copy(src_cell.border)
       dest_cell.alignment = copy.copy(src_cell.alignment)
-      dest_cell.number_format = copy.copy(src_cell.number_format)
+      dest_cell.number_format = src_cell.number_format
+
+  # Escribir encabezados para las columnas adicionales a partir de la Z (columna 26)
+  target_headers = ["PUESTO", "DESCR", "TIPOTRAB", "RAMA", "REGION"]
+  for i, h in enumerate(target_headers):
+    col_idx = 26 + i
+    dest_cell = ws_new.cell(row=1, column=col_idx, value=h)
+    dest_cell.font = Font(bold=True)
+    dest_cell.alignment = Alignment(horizontal="center", vertical="center")
 
   filas_copiadas = 0
   total_filas = 0
   new_row_idx = 2
 
-  # 2. Filtrar y copiar filas manteniendo formatos originales
+  # 2. Filtrar y copiar filas manteniendo formatos originales y agregando los datos dinámicos
   for r in range(2, ws_orig.max_row + 1):
-    if all(es_vacio(ws_orig.cell(r, c).value) for c in range(1, ws_orig.max_column + 1)):
+    if all(es_vacio(ws_orig.cell(r, c).value) for c in range(1, max_col_orig + 1)):
       continue
     total_filas += 1
 
-    # Columna B del archivo final (índice 2, o columna 2)
+    # Columna B del archivo final (índice 2)
     val_b = ws_orig.cell(r, 2).value
     k_emp = clave(val_b)
 
-    encontrado = False
-    if k_emp and k_emp in set_q1:
-      encontrado = True
-    elif k_emp and k_emp in set_q2:
-      encontrado = True
+    info_match = None
+    if k_emp and k_emp in q1_dict:
+      info_match = q1_dict[k_emp]
+    elif k_emp and k_emp in q2_dict:
+      info_match = q2_dict[k_emp]
 
-    if encontrado:
+    if info_match is not None:
       filas_copiadas += 1
-      for col_c in range(1, ws_orig.max_column + 1):
+      # Copiar las columnas originales del archivo final
+      for col_c in range(1, max_col_orig + 1):
         src_cell = ws_orig.cell(row=r, column=col_c)
         dest_cell = ws_new.cell(row=new_row_idx, column=col_c, value=src_cell.value)
         if src_cell.has_style:
@@ -1126,6 +1180,11 @@ def util_filtrar_por_quincenas(f_q1, f_q2, f_final):
           dest_cell.border = copy.copy(src_cell.border)
           dest_cell.alignment = copy.copy(src_cell.alignment)
           dest_cell.number_format = copy.copy(src_cell.number_format)
+
+      # Pegar PUESTO, DESCR, TIPOTRAB, RAMA y REGION a partir de la celda Z (columna 26)
+      for i, h in enumerate(target_headers):
+        ws_new.cell(row=new_row_idx, column=26 + i, value=info_match.get(h))
+
       new_row_idx += 1
 
   for col_letter, dim in ws_orig.column_dimensions.items():
