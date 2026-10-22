@@ -1340,3 +1340,33 @@ def util_formato_quincena(archivo):
   buf = io.BytesIO()
   wb.save(buf)
   return buf.getvalue(), ultima + 1
+
+def util_analizar_reporte(archivo):
+  """Analiza el reporte final para extraer las columnas de Turno (Columna T),
+  Descr (Columna AA) y Tipo de Trabajador (Columna AB).
+  """
+  if hasattr(archivo, "seek"):
+    archivo.seek(0)
+  df = pd.read_excel(archivo, sheet_name=0, dtype=object)
+  if df.empty:
+    raise ValueError("El archivo está vacío.")
+  
+  cols = list(df.columns)
+  # Localizar por nombre o usar posiciones estándar (T = índice 19, AA = 26, AB = 27)
+  c_turno = next((c for c in cols if str(c).strip().upper() == "TURNO"), cols[19] if len(cols) > 19 else None)
+  c_descr = next((c for c in cols if str(c).strip().upper() in ("DESCR", "DESCRIPCION", "DESCRIPCIÓN")), cols[26] if len(cols) > 26 else None)
+  c_tipotrab = next((c for c in cols if str(c).strip().upper() in ("TIPOTRAB", "TIPO DE TRABAJADOR", "TIPO_TRABAJADOR")), cols[27] if len(cols) > 27 else None)
+  
+  if not c_turno or not c_descr or not c_tipotrab:
+    raise ValueError("No se pudieron localizar las columnas de Turno, Descr o Tipo de Trabajador en el archivo.")
+    
+  return df, c_turno, c_descr, c_tipotrab
+
+
+def exportar_por_turno(df, col_turno, turno_seleccionado):
+  """Filtra el DataFrame por un turno específico y genera un archivo Excel en bytes."""
+  df_filtrado = df[df[col_turno].astype(str).str.strip().str.upper() == str(turno_seleccionado).strip().upper()]
+  buf = io.BytesIO()
+  with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+    df_filtrado.to_excel(writer, index=False, sheet_name="REPORTE_TURNO")
+  return buf.getvalue(), len(df_filtrado)
