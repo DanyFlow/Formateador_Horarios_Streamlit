@@ -5,3 +5,4 @@ xlrd>=2.0
 pyxlsb>=1.0
 pypdf>=1.0
 pdfplumber<=0.11.10
+plotly
