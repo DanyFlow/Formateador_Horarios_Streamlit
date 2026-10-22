@@ -1342,8 +1342,8 @@ def util_formato_quincena(archivo):
   return buf.getvalue(), ultima + 1
 
 def util_analizar_reporte(archivo):
-  """Analiza el reporte final para extraer las columnas de Turno (Columna T),
-  Descr (Columna AA) y Tipo de Trabajador (Columna AB).
+  """Analiza el reporte para extraer el Turno (Columna T / índice 19),
+  Descr (Columna AA / índice 26) y Tipo de Trabajador (Columna AB / índice 27).
   """
   if hasattr(archivo, "seek"):
     archivo.seek(0)
@@ -1352,21 +1352,112 @@ def util_analizar_reporte(archivo):
     raise ValueError("El archivo está vacío.")
   
   cols = list(df.columns)
-  # Localizar por nombre o usar posiciones estándar (T = índice 19, AA = 26, AB = 27)
+  
+  # Búsqueda por nombre de encabezado o por posición absoluta de columna Excel (T=19, AA=26, AB=27)
   c_turno = next((c for c in cols if str(c).strip().upper() == "TURNO"), cols[19] if len(cols) > 19 else None)
   c_descr = next((c for c in cols if str(c).strip().upper() in ("DESCR", "DESCRIPCION", "DESCRIPCIÓN")), cols[26] if len(cols) > 26 else None)
   c_tipotrab = next((c for c in cols if str(c).strip().upper() in ("TIPOTRAB", "TIPO DE TRABAJADOR", "TIPO_TRABAJADOR")), cols[27] if len(cols) > 27 else None)
   
   if not c_turno or not c_descr or not c_tipotrab:
-    raise ValueError("No se pudieron localizar las columnas de Turno, Descr o Tipo de Trabajador en el archivo.")
+    raise ValueError("No se pudieron localizar las columnas requeridas (Turno en T, Descr en AA, Tipo de Trabajador en AB).")
     
   return df, c_turno, c_descr, c_tipotrab
 
 
 def exportar_por_turno(df, col_turno, turno_seleccionado):
-  """Filtra el DataFrame por un turno específico y genera un archivo Excel en bytes."""
-  df_filtrado = df[df[col_turno].astype(str).str.strip().str.upper() == str(turno_seleccionado).strip().upper()]
+  """Filtra el DataFrame por un turno específico (Columna T) y genera un Excel descargable."""
+  df_filtrado = df[df[col_turno].astype(str).str.strip().str.upper() == str(turno_seleccionado).strip().upper()].copy()
   buf = io.BytesIO()
   with pd.ExcelWriter(buf, engine="openpyxl") as writer:
     df_filtrado.to_excel(writer, index=False, sheet_name="REPORTE_TURNO")
   return buf.getvalue(), len(df_filtrado)
+
+
+def util_filtrar_por_tarjetas(f_final, texto_tarjetas):
+  """Filtra el archivo final conservando formatos originales según una lista de
+  tarjetas ingresadas como texto separadas por comas (buscando en la Columna A).
+  """
+  # 1. Limpiar y extraer la lista de tarjetas requeridas
+  tarjetas_raw = [t.strip() for t in texto_tarjetas.split(",") if t.strip()]
+  tarjetas_set = {clave(t) for t in tarjetas_raw if clave(t)}
+
+  if not tarjetas_set:
+    raise ValueError("No se ingresaron tarjetas válidas para filtrar.")
+
+  if hasattr(f_final, "seek"):
+    f_final.seek(0)
+  wb_orig = load_workbook(f_final, data_only=True)
+  ws_orig = wb_orig.active
+
+  if ws_orig.max_row < 2:
+    raise ValueError("El archivo final no tiene filas de datos.")
+
+  wb_new = Workbook()
+  ws_new = wb_new.active
+  ws_new.title = "FILTRADO_TARJETAS"
+
+  max_col_orig = ws_orig.max_column
+
+  # 2. Copiar encabezado (fila 1) con sus estilos originales
+  for col_c in range(1, max_col_orig + 1):
+    src_cell = ws_orig.cell(row=1, column=col_c)
+    dest_cell = ws_new.cell(row=1, column=col_c, value=src_cell.value)
+    if src_cell.has_style:
+      dest_cell.font = copy.copy(src_cell.font)
+      dest_cell.fill = copy.copy(src_cell.fill)
+      dest_cell.border = copy.copy(src_cell.border)
+      dest_cell.alignment = copy.copy(src_cell.alignment)
+      dest_cell.number_format = src_cell.number_format
+
+  filas_encontradas = 0
+  tarjetas_vistas = set()
+  datos_vista = []
+  
+  # Usamos _unicos() para evitar el error de nombres de columnas duplicados en Streamlit/PyArrow
+  raw_headers = [str(ws_orig.cell(1, c).value or f"Col {c}") for c in range(1, max_col_orig + 1)]
+  headers = _unicos(raw_headers)
+  
+  new_row_idx = 2
+
+  # 3. Filtrar las filas por coincidencia en la columna A (índice 1)
+  for r in range(2, ws_orig.max_row + 1):
+    if all(es_vacio(ws_orig.cell(r, c).value) for c in range(1, max_col_orig + 1)):
+      continue
+
+    # Leemos la celda de la Columna A (índice 1)
+    val_a = ws_orig.cell(r, 1).value
+    k_emp = clave(val_a)
+
+    if k_emp and k_emp in tarjetas_set:
+      filas_encontradas += 1
+      tarjetas_vistas.add(k_emp)
+      
+      fila_valores = []
+      for col_c in range(1, max_col_orig + 1):
+        src_cell = ws_orig.cell(row=r, column=col_c)
+        dest_cell = ws_new.cell(row=new_row_idx, column=col_c, value=src_cell.value)
+        fila_valores.append(src_cell.value)
+        
+        if src_cell.has_style:
+          dest_cell.font = copy.copy(src_cell.font)
+          dest_cell.fill = copy.copy(src_cell.fill)
+          dest_cell.border = copy.copy(src_cell.border)
+          dest_cell.alignment = copy.copy(src_cell.alignment)
+          dest_cell.number_format = src_cell.number_format
+          
+      datos_vista.append(fila_valores)
+      new_row_idx += 1
+
+  # Copiar dimensiones de columnas originales
+  for col_letter, dim in ws_orig.column_dimensions.items():
+    ws_new.column_dimensions[col_letter].width = dim.width
+
+  ws_new.freeze_panes = "A2"
+  buf = io.BytesIO()
+  wb_new.save(buf)
+
+  # Identificar tarjetas no localizadas en el archivo
+  no_encontradas = [t for t in tarjetas_raw if clave(t) not in tarjetas_vistas]
+  df_vista = pd.DataFrame(datos_vista, columns=headers, dtype=object) if datos_vista else pd.DataFrame()
+
+  return buf.getvalue(), filas_encontradas, len(tarjetas_set), no_encontradas, df_vista
