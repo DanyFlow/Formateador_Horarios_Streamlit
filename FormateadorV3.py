@@ -14,7 +14,7 @@ st.set_page_config(
 )
 st.title("Reporte de horarios del personal")
 
-tab_rep, tab_util = st.tabs(["Generar reporte", "Utilidades"])
+tab_rep, tab_util, tab_analisis = st.tabs(["Generar reporte", "Utilidades", "Análisis y Gráficos"])
 
 
 # ----------------------------------------------------------------------------
@@ -404,6 +404,68 @@ with tab_util:
         mime=XLSX,
         key="u9_dl",
     )
+
+# ----------------------------------------------------------------------------
+# PESTAÑA 3: análisis gráfico y descarga por turno
+# ----------------------------------------------------------------------------
+with tab_analisis:
+  st.subheader("Análisis de datos, métricas y gráficos por turno")
+  st.caption(
+      "Sube tu archivo final o el archivo filtrado por quincenas (que contenga las columnas "
+      "de Turno en la T, Descr en la AA y Tipo de Trabajador en la AB) para visualizar "
+      "gráficos interactivos y descargar reportes independientes por cada turno."
+  )
+
+  u_ana = st.file_uploader("Archivo Excel para análisis", type=["xlsx"], key="u_ana_file")
+
+  if u_ana is not None:
+    try:
+      df_ana, c_turno, c_descr, c_tipotrab = p.util_analizar_reporte(u_ana)
+      st.success(f"¡Archivo cargado con éxito! Se detectaron {len(df_ana)} registros en total.")
+
+      # Métricas generales arriba
+      m1, m2, m3 = st.columns(3)
+      m1.metric("Total de Registros", len(df_ana))
+      turnos_unicos = df_ana[c_turno].dropna().unique()
+      m2.metric("Turnos Encontrados", len(turnos_unicos))
+      m3.metric("Descripciones Únicas (Col. AA)", df_ana[c_descr].dropna().nunique())
+
+      st.divider()
+
+      # Selector de turno
+      st.subheader("Desglose interactivo por Turno")
+      turno_sel = st.selectbox("Selecciona el Turno que deseas visualizar:", options=turnos_unicos, key="sel_turno_ana")
+
+      if turno_sel:
+        df_turno = df_ana[df_ana[c_turno] == turno_sel]
+
+        # Tabla cruzada: cuántos de la columna AA hay por cada Tipo de Trabajador (AB)
+        tabla_resumen = df_turno.groupby([c_descr, c_tipotrab]).size().reset_index(name="CANTIDAD")
+
+        st.markdown(f"**Registros agrupados para el turno: `{turno_sel}`**")
+        st.dataframe(tabla_resumen, hide_index=True)
+
+        # Gráfico nativo de Streamlit
+        if not tabla_resumen.empty:
+          st.markdown("##### 📊 Gráfico de distribución")
+          # Preparamos los datos en formato pivote para el gráfico de barras
+          df_chart = tabla_resumen.pivot(index=c_descr, columns=c_tipotrab, values="CANTIDAD").fillna(0)
+          st.bar_chart(df_chart)
+
+        st.divider()
+
+        # Botón opcional de descarga por turno
+        bytes_turno, n_turno = p.exportar_por_turno(df_ana, c_turno, turno_sel)
+        st.download_button(
+            label=f"📥 Descargar reporte filtrado para el turno {turno_sel} ({n_turno} registros)",
+            data=bytes_turno,
+            file_name=f"REPORTE_TURNO_{str(turno_sel).replace(' ', '_')}.xlsx",
+            mime=XLSX,
+            key=f"dl_turno_{turno_sel}"
+        )
+
+    except Exception as e:
+      st.error(f"No se pudo procesar el archivo para análisis: {e}")
 
 # -------Firma
 import base64
