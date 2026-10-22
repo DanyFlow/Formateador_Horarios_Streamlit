@@ -3,7 +3,15 @@
 Ejecutar:  streamlit run Formateador.py
 """
 
+
+
+import altair as alt
+
+import pandas as pd
+
 import streamlit as st
+
+import plotly.express as px
 
 import procesamiento as p
 
@@ -302,6 +310,45 @@ with tab_util:
 
   st.divider()
 
+  # ---- Filtrar archivo final por tarjetas específicas
+  st.subheader("Filtrar archivo final por lista de tarjetas")
+  st.caption(
+      "Sube el reporte final e ingresa las tarjetas de los empleados que deseas "
+      "extraer separadas por comas (ejemplo: 1023, 1024, 1050). Se generará un nuevo "
+      "archivo copiando todas las columnas y formatos originales de las coincidencias."
+  )
+  u_ft_file = st.file_uploader("Reporte Final o Agrupado (.xlsx)", type=["xlsx"], key="u_ft_file")
+  u_ft_txt = st.text_area("Tarjetas a buscar (separadas por comas)", value="", placeholder="Ejemplo: 1023, 1024, 1050", key="u_ft_txt")
+
+  if st.button("Filtrar por tarjetas", key="u_ft_btn", disabled=not (u_ft_file and u_ft_txt.strip())):
+    try:
+      with st.spinner("Buscando y filtrando tarjetas..."):
+        _guardar("u_ft_res", p.util_filtrar_por_tarjetas(u_ft_file, u_ft_txt))
+    except ValueError as e:
+      st.error(str(e))
+    except Exception as e:
+      st.error(f"No pude procesar el archivo: {e}")
+
+  if "u_ft_res" in st.session_state:
+    bytes_ft, encontradas, total_buscadas, no_encontradas, df_vista_ft = st.session_state["u_ft_res"]
+    st.success(f"¡Filtrado completado! Se encontraron {encontradas} fila(s) de las {total_buscadas} tarjetas ingresadas.")
+    
+    if no_encontradas:
+      st.warning(f"Las siguientes {len(no_encontradas)} tarjetas no se encontraron en el archivo: {', '.join(no_encontradas)}")
+
+    if not df_vista_ft.empty:
+      st.dataframe(df_vista_ft, hide_index=True)
+
+    st.download_button(
+        "Descargar reporte filtrado por tarjetas",
+        bytes_ft,
+        file_name="REPORTE_FILTRADO_TARJETAS.xlsx",
+        mime=XLSX,
+        key="u_ft_dl",
+    )
+
+  st.divider()
+
   
 
   # ---- Obtener personal en firma (macro 2)
@@ -406,58 +453,88 @@ with tab_util:
     )
 
 # ----------------------------------------------------------------------------
-# PESTAÑA 3: análisis gráfico y descarga por turno
+# PESTAÑA 3: análisis gráfico interactivo y descarga por turno (Columna T)
 # ----------------------------------------------------------------------------
 with tab_analisis:
-  st.subheader("Análisis de datos, métricas y gráficos por turno")
+  st.subheader("Análisis de datos, métricas y gráficos por Turno")
   st.caption(
-      "Sube tu archivo final o el archivo filtrado por quincenas (que contenga las columnas "
-      "de Turno en la T, Descr en la AA y Tipo de Trabajador en la AB) para visualizar "
-      "gráficos interactivos y descargar reportes independientes por cada turno."
+      "Sube tu archivo final para visualizar el desglose de la columna AA (Descr) "
+      "frente a la columna AB (Tipo de Trabajador) filtrado por Turno (Columna T)."
   )
 
-  u_ana = st.file_uploader("Archivo Excel para análisis", type=["xlsx"], key="u_ana_file")
+  u_ana = st.file_uploader("Sube tu archivo para análisis", type=["xlsx"], key="u_ana_file")
 
   if u_ana is not None:
     try:
       df_ana, c_turno, c_descr, c_tipotrab = p.util_analizar_reporte(u_ana)
-      st.success(f"¡Archivo cargado con éxito! Se detectaron {len(df_ana)} registros en total.")
+      st.success(f"¡Archivo cargado con éxito! {len(df_ana)} registros procesados.")
 
       # Métricas generales arriba
       m1, m2, m3 = st.columns(3)
       m1.metric("Total de Registros", len(df_ana))
-      turnos_unicos = df_ana[c_turno].dropna().unique()
-      m2.metric("Turnos Encontrados", len(turnos_unicos))
+      turnos_unicos = sorted(df_ana[c_turno].dropna().astype(str).unique())
+      m2.metric("Turnos Detectados (Col. T)", len(turnos_unicos))
       m3.metric("Descripciones Únicas (Col. AA)", df_ana[c_descr].dropna().nunique())
 
       st.divider()
 
-      # Selector de turno
+      # Selector de Turno (Columna T)
       st.subheader("Desglose interactivo por Turno")
-      turno_sel = st.selectbox("Selecciona el Turno que deseas visualizar:", options=turnos_unicos, key="sel_turno_ana")
+      turno_sel = st.selectbox("Selecciona el Turno (Columna T):", options=turnos_unicos, key="sel_turno_ana")
 
       if turno_sel:
-        df_turno = df_ana[df_ana[c_turno] == turno_sel]
+        df_turno = df_ana[df_ana[c_turno].astype(str) == str(turno_sel)]
 
-        # Tabla cruzada: cuántos de la columna AA hay por cada Tipo de Trabajador (AB)
+        # Agrupación: número de registros por Descripción (AA) y Tipo de Trabajador (AB)
         tabla_resumen = df_turno.groupby([c_descr, c_tipotrab]).size().reset_index(name="CANTIDAD")
 
-        st.markdown(f"**Registros agrupados para el turno: `{turno_sel}`**")
+        st.markdown(f"**Registros para el turno `{turno_sel}`** ({len(df_turno)} empleados en total):")
         st.dataframe(tabla_resumen, hide_index=True)
 
-        # Gráfico nativo de Streamlit
+        # Gráfico interactivo completo con Plotly Express
         if not tabla_resumen.empty:
-          st.markdown("##### 📊 Gráfico de distribución")
-          # Preparamos los datos en formato pivote para el gráfico de barras
-          df_chart = tabla_resumen.pivot(index=c_descr, columns=c_tipotrab, values="CANTIDAD").fillna(0)
-          st.bar_chart(df_chart)
+          st.markdown("##### 📊 Distribución por Descripción (AA) y Tipo de Trabajador (AB)")
+          
+          # Calculamos un alto dinámico para que siempre haya espacio suficiente si hay muchas categorías
+          num_categorias = tabla_resumen[c_descr].nunique()
+          alto_grafico = max(450, num_categorias * 35)
+
+          # Gráfico de barras horizontales (evita que los nombres largos de la columna AA se corten)
+          fig = px.bar(
+              tabla_resumen,
+              y=c_descr,
+              x="CANTIDAD",
+              color=c_tipotrab,
+              orientation="h",
+              title=f"Desglose de personal - Turno: {turno_sel}",
+              labels={
+                  c_descr: "Descripción (Columna AA)",
+                  "CANTIDAD": "Número de Empleados",
+                  c_tipotrab: "Tipo de Trabajador (Columna AB)"
+              },
+              text="CANTIDAD" # Muestra la cifra exacta sobre/dentro de cada barra
+          )
+
+          # Personalización visual de ejes, márgenes y leyenda
+          fig.update_layout(
+              height=alto_grafico,
+              yaxis={'categoryorder': 'total ascending'}, # Ordena de mayor a menor cantidad
+              xaxis_title="Número de Empleados",
+              yaxis_title="Descripción (Columna AA)",
+              legend_title_text="Tipo de Trabajador",
+              margin=dict(l=20, r=20, t=50, b=50),
+              hovermode="closest"
+          )
+          fig.update_traces(textposition="outside")
+
+          st.plotly_chart(fig, use_container_width=True)
 
         st.divider()
 
-        # Botón opcional de descarga por turno
+        # Botón opcional para descargar únicamente ese turno
         bytes_turno, n_turno = p.exportar_por_turno(df_ana, c_turno, turno_sel)
         st.download_button(
-            label=f"📥 Descargar reporte filtrado para el turno {turno_sel} ({n_turno} registros)",
+            label=f"📥 Descargar reporte en Excel para el turno {turno_sel} ({n_turno} registros)",
             data=bytes_turno,
             file_name=f"REPORTE_TURNO_{str(turno_sel).replace(' ', '_')}.xlsx",
             mime=XLSX,
