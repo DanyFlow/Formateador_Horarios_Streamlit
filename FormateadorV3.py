@@ -428,9 +428,9 @@ with tab_util:
   ca, cb = st.columns(2)
   texto = ca.text_input("Texto a buscar", value="Guarderia", key="u8_txt")
   col_n = cb.number_input(
-      "Número de columna donde buscar (E = 5)",
+      "Número de columna donde buscar (U = 21)",
       min_value=1,
-      value=5,
+      value=21,
       step=1,
       key="u8_col",
   )
