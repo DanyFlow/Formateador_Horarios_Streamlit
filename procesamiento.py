@@ -1,1463 +1,638 @@
-"""Lógica de negocio: adaptación a Python de las macros VBA de reportes de horarios.
+"""App Streamlit para generar el reporte de horarios del personal.
 
-Flujo principal:
-    leer_reporte_inspector()  -> bloques de 5 filas por empleado a tabla plana (incluye TOLERANCIAS)
-    construir_datos()         -> tabla de horarios con TURNO (activos + en firma)
-    evaluar_turnos()          -> reglas de turno (macros 5 y 6)
-    leer_csv_mysql()          -> export de MySQL (CSV o Excel)
-    cruzar_con_csv()          -> listas de control
-    exportar_final()          -> archivo final: columnas del CSV + horarios (solo valores)
-
-Utilidades independientes:
-    util_corregir_nitro(), util_personal_en_firma() (macro 2), util_buscar_gua() (macro 8), util_formato_quincena() (macro 9)
+Ejecutar:  streamlit run Formateador.py
 """
-from __future__ import annotations
 
-import copy
-import csv
-import io
-import re
-import unicodedata
-from datetime import datetime
-from datetime import time as dtime
-from difflib import SequenceMatcher
+
+
+import altair as alt
 
 import pandas as pd
-import pypdf
-from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
 
-# --------------------------------------------------------------------------
-# Constantes
-# --------------------------------------------------------------------------
-DIAS = ["L", "M", "Mi", "J", "V", "S", "D"]
-COLS_HORA = ["ENTRADA", "SALIDA", "HORAS DE TRABAJO"]
+import streamlit as st
 
-# Columnas C a Q del layout de horarios (15 columnas). TOLERANCIAS ocupa la N.
-COLS_C_A_Q = [
-    "ENTRADA",
-    "SALIDA",
-    *DIAS,
-    "HORAS DE TRABAJO",
-    "TURNO",
-    "TOLERANCIAS",
-    "DESCANSO",
-    "TRABAJO",
-    "TOTAL",
-]
-ORDEN_DATOS = ["TARJETA", "NOMBRE", *COLS_C_A_Q]
+import plotly.express as px
 
-# Solo para la utilidad «Obtener personal EN FIRMA» (macro 2), que sí usa la quincena.
-# (nombre en el reporte, encabezados aceptados en la quincena, opcional)
-COL_QUINCENA = [
-    ("RFC", ["rfc"], False),
-    ("CURP", ["curp"], False),
-    ("SEXO", ["sexo"], True),
-    ("UR", ["ur"], False),
-    ("NOMBRE DEL PROGRAMA", ["nombre del programa", "programa"], True),
-    ("PUESTO", ["puesto"], False),
-    ("DESCRIPCION", ["descripcion", "descripción"], True),
-    (
-        "CLAVE PRESUPUESTAL",
-        ["cve_pago", "clave presupuestal", "clave_presupuestal", "cve pago"],
-        False,
-    ),
-    ("CENTRO", ["centro"], False),
-    ("CLUES", ["clues"], False),
-    ("REGION", ["region", "región"], True),
-    ("CONTRATO", ["contrato"], False),
-    ("TIPO DE TRABAJADOR", ["tipo de trabajador", "tipo_trabajador"], True),
-    ("RAMA", ["rama"], True),
-]
-COLS_EN_FIRMA = [
-    "TARJETA",
-    "RFC",
-    "CURP",
-    "NOMBRE",
-    "UR",
-    "PUESTO",
-    "CLAVE PRESUPUESTAL",
-    "CENTRO",
-    "CLUES",
-    "CONTRATO",
-]
+import procesamiento as p
 
-C_ENCABEZADO = "A3C2AD"  # RGB(163,194,173), el verde de encabezado de las macros
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+st.set_page_config(
+    page_title="Reporte de horarios", page_icon="📋", layout="wide"
+)
+st.title("Reporte de horarios del personal")
+
+tab_rep, tab_util, tab_analisis = st.tabs(["Generar reporte", "Utilidades", "Análisis y Gráficos"])
 
 
-def _relleno(hex_color: str) -> PatternFill:
-  return PatternFill(
-      fill_type="solid", start_color=hex_color, end_color=hex_color
+# ----------------------------------------------------------------------------
+# PESTAÑA 1: flujo principal
+# ----------------------------------------------------------------------------
+with tab_rep:
+  st.subheader("1. Sube los archivos")
+  st.caption(
+      "Reportes de Inspector en Excel (.xlsx, Hoja1). El export de MySQL puede"
+      " ser .csv o .xlsx. Sin el reporte EN FIRMA se trabaja solo con el"
+      " personal activo; quienes solo estén en ese reporte saldrán como «sin"
+      " coincidencia»."
   )
 
-
-# --------------------------------------------------------------------------
-# Utilidades de lectura / normalización
-# --------------------------------------------------------------------------
-def es_vacio(v) -> bool:
-  if v is None:
-    return True
-  try:
-    if pd.isna(v):
-      return True
-  except (TypeError, ValueError):
-    pass
-  return isinstance(v, str) and v.strip() == ""
-
-
-def celda(fila, i):
-  return fila[i] if i < len(fila) else None
-
-
-def valor(v):
-  """Valor de celda limpio: texto sin espacios sobrantes, números tal cual."""
-  if es_vacio(v):
-    return None
-  return v.strip() if isinstance(v, str) else v
-
-
-def clave(v) -> str:
-  """Normaliza una tarjeta para comparar (1023, 1023.0, '1023', '01023' -> '1023')."""
-  if es_vacio(v):
-    return ""
-  if isinstance(v, float) and v.is_integer():
-    v = int(v)
-  s = str(v).strip()
-  if s.isdigit():
-    s = str(int(s))
-  return s
-
-
-def _unicos(etiquetas):
-  """Evita nombres de columna repetidos (el CSV de MySQL trae dos «NOMBRE»)."""
-  vistos, salida = {}, []
-  for e in etiquetas:
-    n = vistos.get(e, 0)
-    vistos[e] = n + 1
-    salida.append(e if n == 0 else f"{e}.{n}")
-  return salida
-
-
-def leer_hoja1(archivo) -> list[list]:
-  """Devuelve todas las filas de la primera hoja del libro."""
-  if hasattr(archivo, "seek"):
-    archivo.seek(0)
-  wb = load_workbook(archivo, read_only=True, data_only=True)
-  try:
-    return [list(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
-  finally:
-    wb.close()
-
-
-_RE_HORA = re.compile(r"^\s*(\d{1,2})[:\.](\d{2})(?::\d{2})?\s*$")
-
-
-def hora_a_min(v):
-  """Minutos desde las 00:00, o None si no es una hora válida."""
-  if es_vacio(v):
-    return None
-  if isinstance(v, (datetime, dtime)):
-    return v.hour * 60 + v.minute
-  if isinstance(v, (int, float)) and not isinstance(v, bool):
-    return int(round(v * 1440)) if 0 <= v < 1 else None  # fracción de día de Excel
-  m = _RE_HORA.match(str(v))
-  if m:
-    h, mi = int(m.group(1)), int(m.group(2))
-    if h < 24 and mi < 60:
-      return h * 60 + mi
-  return None
-
-
-def normalizar_hora(v):
-  """'7:00' -> '07:00'. Lo que no sea hora se conserva como texto (para que salga REVISAR)."""
-  m = hora_a_min(v)
-  if m is not None:
-    return f"{m // 60:02d}:{m % 60:02d}"
-  return None if es_vacio(v) else str(v).strip()
-
-
-def _a_hora_excel(v):
-  m = hora_a_min(v)
-  if m is None:
-    return None if es_vacio(v) else v
-  return dtime(m // 60, m % 60)
-
-
-def _autoajustar(ws, minimo=8, maximo=60):
-  anchos = {}
-  for fila in ws.iter_rows():
-    for c in fila:
-      if c.value is None:
-        continue
-      largo = 5 if isinstance(c.value, (dtime, datetime)) else len(str(c.value))
-      anchos[c.column_letter] = max(anchos.get(c.column_letter, 0), largo)
-  for col, w in anchos.items():
-    ws.column_dimensions[col].width = min(max(w + 2, minimo), maximo)
-
-
-# --------------------------------------------------------------------------
-# Reglas de turno (macros 5 y 6)
-# --------------------------------------------------------------------------
-def _m(hhmm: str) -> int:
-  h, mi = hhmm.split(":")
-  return int(h) * 60 + int(mi)
-
-
-def clasificar_turno(entrada, horas, dias) -> str:
-  """Replica las reglas de las macros. `dias` = [L, M, Mi, J, V, S, D].
-
-  c = hora de entrada, l = horas de trabajo (jornada). Rangos inclusivos.
-  El orden de las reglas importa: se aplica la primera que cumple.
-  """
-  c, l = hora_a_min(entrada), hora_a_min(horas)
-  if c is None or l is None:
-    return "REVISAR"
-  vacios = sum(es_vacio(d) for d in dias)  # CountBlank(E:K)
-  e = dias[0]  # lunes
-  j = None if es_vacio(dias[5]) else str(dias[5]).strip()  # sábado
-  k = None if es_vacio(dias[6]) else str(dias[6]).strip()  # domingo
-
-  if _m("05:00") <= c <= _m("11:30") and _m("05:30") <= l <= _m("09:00"):
-    return "MATUTINO"
-  if _m("12:00") <= c <= _m("17:30") and _m("05:30") <= l <= _m("09:00"):
-    return "VESPERTINO"
-  if (
-      _m("18:00") <= c <= _m("22:00")
-      and _m("10:00") <= l <= _m("12:00")
-      and vacios > 1
-  ):
-    return "NOCTURNO"
-  if _m("06:00") <= c <= _m("11:00") and _m("10:00") <= l <= _m("12:00"):
-    return "JORNADA ACUMULADA"
-  if (
-      _m("18:00") <= c <= _m("22:00")
-      and _m("10:00") <= l <= _m("12:00")
-      and es_vacio(e)
-      and j == "*"
-      and k == "*"
-  ):
-    return "JORNADA ACUMULADA NOCTURNA"
-  return "REVISAR"
-
-
-def evaluar_turnos(df: pd.DataFrame) -> pd.DataFrame:
-  """Normaliza horas/días y recalcula TURNO en todas las filas (macro 6)."""
-  df = df.copy()
-  for c in COLS_HORA:
-    df[c] = df[c].map(normalizar_hora).astype(object)
-  for d in DIAS:
-    df[d] = (
-        df[d].map(lambda v: None if es_vacio(v) else str(v).strip()).astype(object)
-    )
-  df["TURNO"] = df.apply(
-      lambda r: clasificar_turno(
-          r["ENTRADA"], r["HORAS DE TRABAJO"], [r[d] for d in DIAS]
-      ),
-      axis=1,
-  ).astype(object)
-  return df
-
-
-# --------------------------------------------------------------------------
-# Reporte de Inspector (bloques de 5 filas por empleado)
-# --------------------------------------------------------------------------
-_RE_EMPLEADO = re.compile(r"^\s*(\d+)\s+(\S.*?)\s*$")
-_RE_TOTAL = re.compile(r"\bTotal\s*=", re.I)
-
-
-def partir_total(texto: str):
-  """'Descanso = 15h  Trabajo = 37h 30m  Total = 52:30' -> ('15h', '37h 30m', '52:30').
-
-  Si falta alguna parte (p. ej. empleados sin descanso) devuelve '' en esa posición.
-  """
-  t = re.sub(r"\s+", " ", texto or "").strip()
-  d = re.search(r"Descanso\s*=\s*(.*?)(?=\s+Trabajo\s*=|\s+Total\s*=|$)", t, re.I)
-  w = re.search(r"Trabajo\s*=\s*(.*?)(?=\s+Total\s*=|$)", t, re.I)
-  o = re.search(r"Total\s*=\s*(\S+)", t, re.I)
-  return (
-      d.group(1).strip() if d else "",
-      w.group(1).strip() if w else "",
-      o.group(1).strip() if o else "",
+  c1, c2, c3 = st.columns(3)
+  f_act = c1.file_uploader(
+      "Horarios del personal ACTIVO (Inspector)", type=["xlsx"], key="f_act"
+  )
+  f_fir = c2.file_uploader(
+      "Horarios del personal EN FIRMA (Inspector) — opcional",
+      type=["xlsx"],
+      key="f_fir",
+  )
+  f_csv = c3.file_uploader(
+      "Export de MySQL (columna A = tarjeta)", type=["csv", "xlsx"], key="f_csv"
   )
 
-
-def leer_reporte_inspector(archivo, etiqueta: str):
-  """Lee un reporte de Inspector convertido a Excel (Hoja1).
-
-  No depende de saltos fijos de 5 filas: reconoce cada empleado por su renglón
-  «número  NOMBRE» y toma el renglón de horario que sigue al encabezado
-  «Actividad».
-  Ignora los encabezados «Reporte de horarios por empleado» que se repiten por
-  página.
-  TOLERANCIAS es el valor de la columna L de ese renglón de horario (L4, L9,
-  L14… del layout).
-  """
-  filas = leer_hoja1(archivo)
-  empleados, emp = [], None
-  for r in filas:
-    a, b = celda(r, 0), celda(r, 1)
-    if isinstance(a, str):
-      sa = a.strip()
-      if sa.lower().startswith("reporte de horarios"):
-        continue
-      if _RE_TOTAL.search(sa):
-        if emp is not None:
-          emp["total"] = sa
-        continue
-      m = _RE_EMPLEADO.match(sa)
-      if m:
-        emp = {
-            "tarjeta": clave(m.group(1)),
-            "nombre": m.group(2),
-            "horario": None,
-            "hdr": False,
-            "trabajos": [],
-            "total": "",
-        }
-        empleados.append(emp)
-        continue
-    if emp is None or es_vacio(b):
-      continue
-    sb = str(b).strip()
-    if sb.lower() == "actividad":
-      emp["hdr"] = True
-    elif emp["hdr"]:
-      if (
-          hora_a_min(celda(r, 2)) is not None
-      ):  # renglón de horario (Trabajo, trabajo...)
-        emp["trabajos"].append(r)
-    elif emp["horario"] is None:
-      emp["horario"] = sb  # texto descriptivo del horario
-
-  avisos, registros, vistos = [], [], set()
-  for e in empleados:
-    t = e["trabajos"]
-    if e["tarjeta"] in vistos:
-      avisos.append(
-          f"[{etiqueta}] Tarjeta {e['tarjeta']} ({e['nombre']}) aparece más de"
-          " una vez; se usó la primera."
-      )
-      continue
-    vistos.add(e["tarjeta"])
-    if len(t) > 1:
-      avisos.append(
-          f"[{etiqueta}] Tarjeta {e['tarjeta']} ({e['nombre']}) tiene {len(t)}"
-          " horarios; se usó el primero. Revísalo."
-      )
-    elif not t:
-      avisos.append(
-          f"[{etiqueta}] Tarjeta {e['tarjeta']} ({e['nombre']}) no trae renglón"
-          " de horario."
-      )
-    r = t[0] if t else []
-    desc, trab, tot = partir_total(e["total"])
-    registros.append({
-        "TARJETA": e["tarjeta"],
-        "NOMBRE": e["nombre"],
-        "ENTRADA": normalizar_hora(celda(r, 2)),
-        "SALIDA": normalizar_hora(celda(r, 3)),
-        **{
-            d: (
-                None
-                if es_vacio(celda(r, 4 + i))
-                else str(celda(r, 4 + i)).strip()
-            )
-            for i, d in enumerate(DIAS)
-        },
-        "HORAS DE TRABAJO": normalizar_hora(celda(r, 14)),
-        "TOLERANCIAS": valor(celda(r, 11)),
-        "DESCANSO": f"Descanso ={desc}" if desc else None,
-        "TRABAJO": f"Trabajo ={trab}" if trab else None,
-        "TOTAL": f"Total ={tot}" if tot else None,
-        "_HORARIO": e["horario"],
-    })
-  if not registros:
-    raise ValueError(
-        f"No encontré empleados en el reporte de {etiqueta}. Revisa que sea el"
-        " reporte de Inspector convertido a Excel (Hoja1)."
-    )
-  return registros, avisos
-
-
-def construir_datos(act, fir):
-  """Une activos y en firma en una sola tabla y calcula el turno."""
-  avisos = []
-  firma_set = {r["TARJETA"] for r in fir}
-  registros, ya = list(act), {r["TARJETA"] for r in act}
-  for r in fir:
-    if r["TARJETA"] in ya:
-      avisos.append(
-          f"Tarjeta {r['TARJETA']} ({r['NOMBRE']}) está en ACTIVOS y EN FIRMA;"
-          " se dejó una sola fila."
-      )
-    else:
-      registros.append(r)
-      ya.add(r["TARJETA"])
-  filas = [{**r, "_INACTIVO": r["TARJETA"] in firma_set} for r in registros]
-  df = pd.DataFrame(
-      filas, columns=[*ORDEN_DATOS, "_HORARIO", "_INACTIVO"], dtype=object
-  )
-  return evaluar_turnos(df), avisos
-
-
-# --------------------------------------------------------------------------
-# Export de MySQL (CSV o Excel) y cruce con los horarios
-# --------------------------------------------------------------------------
-def _decodificar(raw: bytes) -> str:
-  for enc in ("utf-8-sig", "cp1252"):
+  if st.button("Procesar", type="primary", disabled=not (f_act and f_csv)):
     try:
-      return raw.decode(enc)
-    except UnicodeDecodeError:
-      continue
-  return raw.decode("latin-1")
+      with st.spinner("Procesando…"):
+        st.session_state["res"] = p.procesar(f_act, f_fir, f_csv)
+    except ValueError as e:
+      st.error(str(e))
+    except Exception as e:  # noqa: BLE001 - se muestra al usuario
+      st.error(f"No pude procesar los archivos: {e}")
 
+  res = st.session_state.get("res")
+  if res:
+    datos, cruce = res["datos"], res["cruce"]
 
-def leer_tabla(archivo) -> list[list]:
-  """Filas de un .csv (separador y codificación detectados) o de la Hoja1 de un .xlsx."""
-  nombre = str(getattr(archivo, "name", archivo)).lower()
-  if not nombre.endswith((".csv", ".txt")):
-    return leer_hoja1(archivo)
-  if hasattr(archivo, "read"):
-    archivo.seek(0)
-    raw = archivo.read()
-  else:
-    with open(archivo, "rb") as f:
-      raw = f.read()
-  texto = _decodificar(raw)
-  primera = next((ln for ln in texto.splitlines() if ln.strip(", ;\t|")), "")
-  sep = max([",", ";", "\t", "|"], key=primera.count)
-  return [
-      list(r) for r in csv.reader(io.StringIO(texto, newline=""), delimiter=sep)
-  ]
-
-
-def _convertir(v):
-  """Texto -> número cuando es un entero sin ceros a la izquierda (como lo abriría Excel)."""
-  if es_vacio(v):
-    return None
-  if isinstance(v, str):
-    s = v.strip()
-    return int(s) if re.fullmatch(r"0|[1-9]\d{0,14}", s) else s
-  return v
-
-
-def leer_csv_mysql(archivo):
-  """Lee el export de MySQL. La columna A debe ser la tarjeta; se ignoran las filas vacías."""
-  filas = leer_tabla(archivo)
-  i0 = next(
-      (i for i, r in enumerate(filas) if any(not es_vacio(c) for c in r)), None
-  )
-  if i0 is None:
-    raise ValueError("El archivo de MySQL está vacío.")
-  enc = ["" if es_vacio(c) else str(c).strip() for c in filas[i0]]
-  while enc and not enc[-1]:
-    enc.pop()
-  if not enc or "tarjeta" not in enc[0].lower():
-    raise ValueError(
-        "En el archivo de MySQL, la columna A debe ser la tarjeta"
-        " (TARJETAEMPLEADO) y el encabezado debe estar en la primera fila."
+    # ---- Resumen rápido
+    st.subheader("2. Resultado")
+    n_rev = int((datos["TURNO"] == "REVISAR").sum())
+    m = st.columns(5)
+    m[0].metric("Empleados en Inspector", len(datos))
+    m[1].metric("En firma (inactivos)", int(datos["_INACTIVO"].sum()))
+    m[2].metric("Turnos por REVISAR", n_rev)
+    m[3].metric("Filas del CSV con coincidencia", cruce["coincidencias"])
+    m[4].metric(
+        "Filas del CSV sin coincidencia", len(cruce["sin_coincidencia"])
     )
-  n = len(enc)
-  datos, vacias = [], 0
-  for r in filas[i0 + 1 :]:
-    r = list(r)[:n]
-    if all(es_vacio(c) for c in r):
-      vacias += 1
-      continue
-    datos.append([_convertir(c) for c in r] + [None] * (n - len(r)))
-  return {"encabezado": enc, "filas": datos, "vacias": vacias}
+    if cruce["vacias"]:
+      st.caption(f"Se ignoraron {cruce['vacias']} filas vacías del CSV.")
 
-
-def cruzar_con_csv(df: pd.DataFrame, csv_info: dict) -> dict:
-  """Listas de control: filas del CSV sin coincidencia y empleados de Inspector fuera del CSV."""
-  enc, filas = csv_info["encabezado"], csv_info["filas"]
-  en_inspector = set(df["TARJETA"])
-  claves_csv = [clave(f[0]) for f in filas]
-  vistos, repetidas = set(), set()
-  for k in claves_csv:
-    if k and k in vistos:
-      repetidas.add(k)
-    vistos.add(k)
-
-  idx_vis = [i for i in (0, 2, 3) if i < len(enc)]
-  etiquetas = _unicos([enc[i] for i in idx_vis])
-  sin = [
-      [f[i] for i in idx_vis]
-      for f, k in zip(filas, claves_csv)
-      if k not in en_inspector
-  ]
-  coinc = sum(1 for k in claves_csv if k in en_inspector)
-  no_en_csv = df.loc[~df["TARJETA"].isin(set(claves_csv)), ["TARJETA", "NOMBRE"]]
-
-  avisos = []
-  if repetidas:
-    avisos.append(
-        f"{len(repetidas)} tarjeta(s) repetida(s) en el CSV (cada fila recibe"
-        " el mismo horario): "
-        + ", ".join(sorted(repetidas)[:15])
-        + ("…" if len(repetidas) > 15 else "")
+    conteo = (
+        datos["TURNO"]
+        .value_counts()
+        .rename_axis("Turno")
+        .reset_index(name="Personal")
     )
-  j = next(
-      (i for i, h in enumerate(enc) if h.strip().lower() == "borrado"), None
-  )
-  if j is not None:
-    marcadas = sum(
-        1
-        for f, k in zip(filas, claves_csv)
-        if k in en_inspector and not es_vacio(f[j]) and str(f[j]).strip() != "0"
-    )
-    if marcadas:
-      avisos.append(
-          f"{marcadas} fila(s) con coincidencia tienen BORRADO distinto de 0;"
-          " se incluyen en el archivo final (puedes filtrarlas por esa"
-          " columna)."
+    st.dataframe(conteo, hide_index=True)
+
+    if res["avisos"]:
+      with st.expander(f"Avisos ({len(res['avisos'])})", expanded=True):
+        for a in res["avisos"]:
+          st.warning(a)
+
+    # ---- Listas de control
+    with st.expander(
+        "Filas del CSV sin coincidencia en Inspector"
+        f" ({len(cruce['sin_coincidencia'])})"
+    ):
+      st.caption(
+          "No pasan al archivo final. Revisa si la tarjeta está mal capturada o"
+          " si falta el empleado en alguno de los reportes de Inspector."
       )
-  if len(enc) > 9:
-    avisos.append(
-        f"El CSV trae {len(enc)} columnas; los horarios se pegan desde la"
-        f" columna {get_column_letter(len(enc) + 1)} para no sobrescribir"
-        " datos."
-    )
-  return {
-      "coincidencias": coinc,
-      "sin_coincidencia": pd.DataFrame(sin, columns=etiquetas, dtype=object),
-      "no_en_csv": no_en_csv.reset_index(drop=True),
-      "vacias": csv_info["vacias"],
-      "avisos": avisos,
-  }
-
-
-def procesar(f_activos, f_firma, f_csv):
-  """`f_firma` es opcional (None): sin él solo se trabaja con los empleados del reporte de activos."""
-  act, av1 = leer_reporte_inspector(f_activos, "activos")
-  fir, av2 = (
-      leer_reporte_inspector(f_firma, "en firma")
-      if f_firma is not None
-      else ([], [])
-  )
-  df, av3 = construir_datos(act, fir)
-  csv_info = leer_csv_mysql(f_csv)
-  cruce = cruzar_con_csv(df, csv_info)
-  return {
-      "datos": df,
-      "csv": csv_info,
-      "cruce": cruce,
-      "avisos": av1 + av2 + av3 + cruce["avisos"],
-      "version": 0,
-      "final": None,
-  }
-
-
-# --------------------------------------------------------------------------
-# Archivo final
-# --------------------------------------------------------------------------
-def exportar_final(df: pd.DataFrame, csv_info: dict) -> bytes:
-  """Filas del CSV con coincidencia: columnas del CSV (A:I) + columnas C:Q del reporte (J:X).
-
-  Solo valores. Si el CSV tuviera más de 9 columnas, los horarios se pegan después de la última.
-  """
-  enc, filas = csv_info["encabezado"], csv_info["filas"]
-  n = len(enc)
-  inicio = max(10, n + 1)  # columna (1-based) donde empiezan los horarios
-  por_tarjeta = {
-      r["TARJETA"]: [r[c] for c in COLS_C_A_Q] for _, r in df.iterrows()
-  }
-  hora_idx = {inicio + COLS_C_A_Q.index(c) for c in COLS_HORA}
-
-  wb = Workbook()
-  ws = wb.active
-  ws.title = "REPORTE_HORARIOS"
-  ws.append(enc + [None] * (inicio - 1 - n) + COLS_C_A_Q)
-  for c in range(1, inicio + len(COLS_C_A_Q)):
-    x = ws.cell(row=1, column=c)
-    x.fill = _relleno(C_ENCABEZADO)
-    x.font = Font(bold=True)
-    x.alignment = Alignment(horizontal="center", vertical="center")
-
-  for f in filas:
-    h = por_tarjeta.get(clave(f[0]))
-    if h is None:
-      continue
-    valores = [None if es_vacio(v) else v for v in h]
-    for i, c in enumerate(COLS_C_A_Q):
-      if c in COLS_HORA:
-        valores[i] = _a_hora_excel(valores[i])
-    ws.append(f + [None] * (inicio - 1 - n) + valores)
-    for col in hora_idx:
-      x = ws.cell(row=ws.max_row, column=col)
-      if isinstance(x.value, dtime):
-        x.number_format = "hh:mm"
-  ws.freeze_panes = "A2"
-  _autoajustar(ws)
-  buf = io.BytesIO()
-  wb.save(buf)
-  return buf.getvalue()
-
-
-# --------------------------------------------------------------------------
-# Utilidades independientes
-# --------------------------------------------------------------------------
-def util_corregir_nitro(pdf_file, excel_file):
-  """Corrige la omisión de la primera línea de empleado que Nitro realiza por cada página del PDF."""
-  reader = pypdf.PdfReader(pdf_file)
-  patron_emp = re.compile(r"^(\d{1,6})\s+([A-ZÑÁÉÍÓÚ\.\-\,\s]+)$")
-
-  # 1. Extraer secuencia completa del PDF
-  secuencia_pdf = []
-  for page in reader.pages:
-    text = page.extract_text() or ""
-    for line in text.split("\n"):
-      line_str = line.strip()
-      if patron_emp.match(line_str):
-        secuencia_pdf.append(line_str)
-
-  # 2. Cargar Excel original de Nitro
-  if hasattr(excel_file, "seek"):
-    excel_file.seek(0)
-  wb_orig = load_workbook(excel_file)
-  ws_orig = wb_orig.active
-
-  # 3. Mapear posiciones faltantes
-  insert_dict = {}
-  idx_pdf = 0
-
-  r = 1
-  while r <= ws_orig.max_row and idx_pdf < len(secuencia_pdf):
-    val_a = str(ws_orig.cell(r, 1).value or "").strip()
-    val_m = str(ws_orig.cell(r, 13).value or "").strip()
-
-    if patron_emp.match(val_a):
-      idx_pdf += 1
-      r += 1
-    elif r == 1 or val_m == "Fecha":
-      prev_a = str(ws_orig.cell(r - 1, 1).value or "").strip() if r > 1 else ""
-      if not patron_emp.match(prev_a):
-        insert_dict[r] = secuencia_pdf[idx_pdf]
-        idx_pdf += 1
-      r += 1
-    else:
-      r += 1
-
-  # 4. Reconstruir nuevo libro manteniendo formatos e insertar filas faltantes
-  wb_new = Workbook()
-  ws_new = wb_new.active
-  ws_new.title = ws_orig.title
-
-  for col_letter, dim in ws_orig.column_dimensions.items():
-    ws_new.column_dimensions[col_letter].width = dim.width
-
-  new_row_idx = 1
-  for orig_r in range(1, ws_orig.max_row + 1):
-    if orig_r in insert_dict:
-      ws_new.cell(row=new_row_idx, column=1, value=insert_dict[orig_r])
-      new_row_idx += 1
-
-    for col_c in range(1, ws_orig.max_column + 1):
-      src_cell = ws_orig.cell(row=orig_r, column=col_c)
-      dest_cell = ws_new.cell(row=new_row_idx, column=col_c)
-
-      dest_cell.value = src_cell.value
-      if src_cell.has_style:
-        dest_cell.font = copy.copy(src_cell.font)
-        dest_cell.fill = copy.copy(src_cell.fill)
-        dest_cell.border = copy.copy(src_cell.border)
-        dest_cell.alignment = copy.copy(src_cell.alignment)
-        dest_cell.number_format = src_cell.number_format
-        dest_cell.protection = copy.copy(src_cell.protection)
-
-    new_row_idx += 1
-
-  # 5. Remaquetar celdas combinadas recalculando rangos
-  for merged_range in list(ws_orig.merged_cells.ranges):
-    min_col, min_row, max_col, max_row = merged_range.bounds
-
-    shift_before = sum(1 for row_k in insert_dict.keys() if row_k <= min_row)
-    shift_total = sum(1 for row_k in insert_dict.keys() if row_k <= max_row)
-
-    new_min_row = min_row + shift_before
-    new_max_row = max_row + shift_total
-
-    new_range_str = f"{get_column_letter(min_col)}{new_min_row}:{get_column_letter(max_col)}{new_max_row}"
-    ws_new.merge_cells(new_range_str)
-
-  buf = io.BytesIO()
-  wb_new.save(buf)
-  return buf.getvalue(), len(insert_dict)
-
-
-# --------------------------------------------------------------------------
-# Utilidad: agrupar empleados por tipo de horario (sobre el reporte final)
-# --------------------------------------------------------------------------
-_ORDEN_TIPOS = ["BASIFICADOS", "EVENTUALES", "GUARDERIA", "SIN TOLERANCIA"]
-_ORDEN_CLASES = [
-    "MATUTINO",
-    "VESPERTINO",
-    "NOCTURNO",
-    "JORNADA ACUMULADA DIURNA",
-    "JORNADA ACUMULADA NOCTURNA",
-    "IRREGULAR",
-    "SIN HORARIO",
-]
-_ORDEN_TURNOS = [
-    "MATUTINO",
-    "VESPERTINO",
-    "NOCTURNO",
-    "JORNADA ACUMULADA",
-    "JORNADA ACUMULADA NOCTURNA",
-    "REVISAR",
-]
-_DIAS_LARGO = [
-    "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO",
-]
-_DIAS_CORTO = ["L", "M", "Mi", "J", "V", "S", "D"]
-# Los 7 patrones nocturnos válidos: 3 * (cada uno seguido de celda vacía, la
-# salida) y una sola D. La letra la define el día que descansa.
-_NOCTURNOS = {
-    "*-*-*-D": "A",
-    "D*-*-*-": "B",
-    "-*-*-D*": "C",
-    "*-*-D*-": "D",
-    "*-D*-*-": "E",
-    "-D*-*-*": "F",
-    "-*-D*-*": "G",
-}
-C_SIN_TOLERANCIA = "F8CBAD"  # naranja suave: tolerancia vacía
-C_TOLERANCIA_RARA = "FF6B6B"  # rojo: tolerancia distinta a las 3 principales
-C_IRREGULAR = "FFE699"  # amarillo: días irregulares
-C_GRUPO_ALTERNO = "EAF1F8"  # azul muy suave: sombreado alterno por grupo
-
-
-def _tipo_tolerancia(v):
-  """TOLERANCIAS -> palabra del distintivo (GENERALES SSJ = BASIFICADOS)."""
-  if es_vacio(v):
-    return "SIN TOLERANCIA"
-  s = unicodedata.normalize("NFKD", str(v)).encode("ascii", "ignore").decode()
-  s = s.strip().lower()
-  if s.startswith("general"):
-    return "BASIFICADOS"
-  if s.startswith("eventual"):
-    return "EVENTUALES"
-  if s.startswith("guarder"):
-    return "GUARDERIA"
-  return str(v).strip().upper()  # otra tolerancia: se deja como viene (en rojo)
-
-
-def _valor_comparable(v):
-  """Valor normalizado para comparar celdas (las horas se comparan por minutos)."""
-  if es_vacio(v):
-    return None
-  if isinstance(v, (datetime, dtime, str)):
-    m = hora_a_min(v)
-    if m is not None:
-      return ("h", m)
-  if isinstance(v, str):
-    return v.strip()
-  return v
-
-
-def _minutos(v):
-  return hora_a_min(v) if isinstance(v, (datetime, dtime, str)) else None
-
-
-def _min_o_final(v):
-  m = _minutos(v)
-  return 9999 if m is None else m
-
-
-def _patron_dias(valores):
-  """Marcas L..D -> texto de 7 caracteres ('*', 'D', '-' = vacía) o None si hay otra cosa."""
-  marcas = []
-  for v in valores:
-    if es_vacio(v):
-      marcas.append("-")
-    else:
-      m = str(v).strip().upper()
-      if m not in ("*", "D"):
-        return None
-      marcas.append(m)
-  return "".join(marcas)
-
-
-def _inicio_corrida(patron):
-  """Jornada corrida = 5 * seguidos (en círculo) y 2 D seguidas. Devuelve el día de inicio."""
-  if patron.count("*") != 5 or patron.count("D") != 2 or "-" in patron:
-    return None
-  for i in range(7):
-    if patron[i - 1] == "D" and all(patron[(i + k) % 7] == "*" for k in range(5)):
-      return i
-  return None
-
-
-def _describir(valores, entrada, turno_t):
-  """Clasifica un horario por la estructura de sus días y la hora de entrada.
-
-  Devuelve (clase, prefijo, dias, subclave). `clase` ordena los grupos; `prefijo` y
-  `dias` forman la etiqueta. La columna TURNO solo se usa para rotular irregulares.
-  """
-  c = _minutos(entrada)
-  if c is None:
-    return "SIN HORARIO", "SIN HORARIO", "", ()
-  diurna = 5 * 60 <= c < 18 * 60
-  patron = _patron_dias(valores)
-  if patron is not None:
-    ini = _inicio_corrida(patron)
-    if ini is not None and diurna:
-      clase = "MATUTINO" if c < 12 * 60 else "VESPERTINO"
-      return clase, clase, f"{_DIAS_LARGO[ini]} A {_DIAS_LARGO[(ini + 4) % 7]}", ini
-    letra = _NOCTURNOS.get(patron)
-    if letra is not None and not diurna:
-      dias = "-".join(_DIAS_CORTO[i] for i, m in enumerate(patron) if m == "*")
-      return "NOCTURNO", "NOCTURNO", f"{letra} ({dias})", letra
-    if patron == "DDDDD**" and diurna:
-      return "JORNADA ACUMULADA DIURNA", "JORNADA ACUMULADA DIURNA", "", ()
-    if patron == "-DDDD**" and not diurna:
-      return "JORNADA ACUMULADA NOCTURNA", "JORNADA ACUMULADA NOCTURNA", "", ()
-  # Irregular: la estructura no corresponde a ninguna regla (o choca con la hora de entrada)
-  dias = "-".join(
-      _DIAS_CORTO[i] for i, v in enumerate(valores) if str(v or "").strip() == "*"
-  ) or "SIN *"
-  turno = "SIN TURNO" if es_vacio(turno_t) else str(turno_t).strip().upper()
-  pos = _ORDEN_TURNOS.index(turno) if turno in _ORDEN_TURNOS else len(_ORDEN_TURNOS)
-  return "IRREGULAR", f"IRREGULAR {turno}", dias, (pos, dias)
-
-
-def util_agrupar_horarios(archivo):
-  """Agrupa a los empleados del reporte final que tienen el mismo horario.
-
-  Compara las columnas J a U (ENTRADA ... TOLERANCIAS). Copia las columnas A a X
-  a una hoja nueva (AGRUPADO), con los empleados iguales juntos, y agrega en la
-  columna Y el tipo de horario. Solo reordena y aplica formato de centrado y bordes.
-  """
-  if hasattr(archivo, "seek"):
-    archivo.seek(0)
-  wb = load_workbook(archivo)
-  ws = wb.worksheets[0]
-  if ws.max_row < 2:
-    raise ValueError("El archivo no tiene filas de datos.")
-  avisos = []
-
-  # Columnas: se buscan por encabezado (ENTRADA ... TOLERANCIAS = J:U).
-  nombres = [n.upper() for n in COLS_C_A_Q[:12]]
-  ini = None
-  for c in ws[1]:
-    if str(c.value or "").strip().upper() == "ENTRADA":
-      ini = c.column
-      break
-  if ini is None or [
-      str(ws.cell(1, ini + i).value or "").strip().upper() for i in range(12)
-  ] != nombres:
-    ini = 10
-    avisos.append(
-        "No encontré los encabezados ENTRADA a TOLERANCIAS en la fila 1; se"
-        " compararon las columnas J a U."
-    )
-  c_fin = ini + 14  # TOTAL (columna X)
-  c_tipo = c_fin + 1  # distintivo (columna Y)
-  c_dias = range(ini + 2, ini + 9)  # L..R
-  c_turno, c_tol = ini + 10, ini + 11
-
-  filas, vacias = [], 0
-  for r in range(2, ws.max_row + 1):
-    if all(es_vacio(ws.cell(r, c).value) for c in range(1, c_fin + 1)):
-      vacias += 1
-    else:
-      filas.append(r)
-  if not filas:
-    raise ValueError("El archivo no tiene filas de datos.")
-  if vacias:
-    avisos.append(f"Se omitieron {vacias} fila(s) completamente vacías.")
-
-  # Grupos: empleados idénticos en J:U
-  grupos = {}
-  for pos, r in enumerate(filas):
-    k = tuple(_valor_comparable(ws.cell(r, c).value) for c in range(ini, ini + 12))
-    g = grupos.get(k)
-    if g is None:
-      valores = [ws.cell(r, c).value for c in c_dias]
-      clase, prefijo, dias, sub = _describir(
-          valores, ws.cell(r, ini).value, ws.cell(r, c_turno).value
+      st.dataframe(cruce["sin_coincidencia"], hide_index=True)
+    with st.expander(
+        "Empleados de Inspector que no están en el CSV"
+        f" ({len(cruce['no_en_csv'])})"
+    ):
+      st.caption(
+          "Tienen horario en Inspector pero no aparecen en el export de MySQL."
       )
-      tipo = _tipo_tolerancia(ws.cell(r, c_tol).value)
-      base = prefijo if clase == "SIN HORARIO" else " ".join(
-          x for x in (prefijo, dias, tipo) if x
-      )
-      g = grupos[k] = {
-          "clase": clase, "tipo": tipo, "sub": sub, "base": base,
-          "filas": [], "primero": pos, "r0": r,
+      st.dataframe(cruce["no_en_csv"], hide_index=True)
+
+    # ---- Corrección de horarios (macro 6)
+    st.subheader("3. Revisar y corregir horarios")
+    st.caption(
+        "Corrige horas o marcas de día (* = labora, D = descanso, vacío = fuera"
+        " de su jornada) y pulsa «Aplicar cambios y reevaluar». Un error común:"
+        " en jornada acumulada nocturna, el lunes debe quedar vacío."
+    )
+    solo = st.toggle("Mostrar solo los REVISAR", value=n_rev > 0, key="solo_rev")
+    vista = datos[datos["TURNO"] == "REVISAR"] if solo else datos
+    cols_edit = ["ENTRADA", "SALIDA", *p.DIAS, "HORAS DE TRABAJO"]
+    editado = None
+    if solo and vista.empty:
+      st.success("No hay horarios en REVISAR.")
+    else:
+      cfg = {
+          d: st.column_config.SelectboxColumn(
+              d, options=["*", "D"], width="small"
+          )
+          for d in p.DIAS
       }
-    g["filas"].append(r)
-
-  # Orden de los grupos y numeración de variantes
-  por_base = {}
-  for g in grupos.values():
-    por_base.setdefault(g["base"], []).append(g)
-  total_base = {b: sum(len(g["filas"]) for g in lista) for b, lista in por_base.items()}
-
-  def _pos(lista, valor):
-    return lista.index(valor) if valor in lista else len(lista)
-
-  def _orden_base(item):
-    base, lista = item
-    g0 = lista[0]
-    sub = g0["sub"]
-    if g0["clase"] in ("MATUTINO", "VESPERTINO"):
-      sub = (-total_base[base], sub)
-    elif not isinstance(sub, tuple):
-      sub = (sub,)
-    return (
-        _pos(_ORDEN_CLASES, g0["clase"]),
-        _pos(_ORDEN_TIPOS, g0["tipo"]),
-        g0["tipo"],
-        sub,
-        base,
-    )
-
-  ordenados = []
-  for base, lista in sorted(por_base.items(), key=_orden_base):
-    lista.sort(
-        key=lambda g: (
-            -len(g["filas"]),
-            _min_o_final(ws.cell(g["r0"], ini).value),
-            _min_o_final(ws.cell(g["r0"], ini + 1).value),
-            g["primero"],
+      cfg["_HORARIO"] = st.column_config.TextColumn("Horario (Inspector)")
+      for c in ("ENTRADA", "SALIDA", "HORAS DE TRABAJO"):
+        cfg[c] = st.column_config.TextColumn(
+            c, help="Formato HH:MM", width="small"
         )
-    )
-    for n, g in enumerate(lista, start=1):
-      sin_numero = g["clase"] == "SIN HORARIO" and len(lista) == 1
-      g["etiqueta"] = base if sin_numero else f"{base} {n}"
-      ordenados.append(g)
+      editado = st.data_editor(
+          vista[[
+              "TARJETA",
+              "NOMBRE",
+              "_HORARIO",
+              *cols_edit,
+              "TURNO",
+              "TOLERANCIAS",
+          ]],
+          column_config=cfg,
+          disabled=["TARJETA", "NOMBRE", "_HORARIO", "TURNO", "TOLERANCIAS"],
+          hide_index=True,
+          key=f"editor_{res['version']}_{int(solo)}",
+      )
+    if st.button("Aplicar cambios y reevaluar turnos"):
+      if editado is not None:
+        datos.loc[editado.index, cols_edit] = editado[cols_edit]
+      res["datos"] = p.evaluar_turnos(datos)
+      res["version"] += 1
+      res["final"] = None
+      st.rerun()
 
-  # Libro nuevo con una sola hoja
-  wn = Workbook()
-  wsn = wn.active
-  wsn.title = "AGRUPADO"
+    # ---- Archivo final
+    st.subheader("4. Generar archivo final")
+    if n_rev:
+      st.info(
+          f"Todavía hay {n_rev} turno(s) en REVISAR; saldrán así en el archivo"
+          " final."
+      )
+    if cruce["coincidencias"] == 0:
+      st.error(
+          "Ninguna fila del CSV coincide con los empleados de Inspector; revisa"
+          " la columna A del CSV."
+      )
+    elif st.button("Generar archivo final"):
+      res["final"] = p.exportar_final(res["datos"], res["csv"])
+    if res.get("final"):
+      st.download_button(
+          "Descargar archivo final (.xlsx)",
+          res["final"],
+          file_name="REPORTE_HORARIOS_FINAL.xlsx",
+          mime=XLSX,
+      )
+      st.caption(
+          f"{cruce['coincidencias']} fila(s): columnas del CSV + ENTRADA a"
+          " TOTAL de Inspector (TOLERANCIAS incluida). Solo valores."
+      )
 
-  def _copiar(src, dst):
-    dst.value = src.value
-    if src.has_style:
-      dst.font = copy.copy(src.font)
-      dst.fill = copy.copy(src.fill)
-      dst.number_format = copy.copy(src.number_format)
-      dst.protection = copy.copy(src.protection)
 
-  for c in range(1, c_fin + 1):
-    _copiar(ws.cell(1, c), wsn.cell(1, c))
-  enc_tipo = wsn.cell(1, c_tipo)
-  _copiar(ws.cell(1, c_fin), enc_tipo)
-  enc_tipo.value = "TIPO DE HORARIO"
+# ----------------------------------------------------------------------------
+# PESTAÑA 2: utilidades independientes
+# ----------------------------------------------------------------------------
+def _guardar(clave_estado, valor):
+  st.session_state[clave_estado] = valor
 
-  fila_nueva = 2
-  n_irregulares = n_tol_rara = n_sin_tol = 0
-  for i, g in enumerate(ordenados):
-    irregular = g["clase"] == "IRREGULAR"
-    sin_tol = g["tipo"] == "SIN TOLERANCIA" and g["clase"] != "SIN HORARIO"
-    rara = g["tipo"] not in _ORDEN_TIPOS
-    if irregular:
-      n_irregulares += len(g["filas"])
-    if rara:
-      n_tol_rara += len(g["filas"])
-    if sin_tol:
-      n_sin_tol += len(g["filas"])
-    for r in g["filas"]:
-      for c in range(1, c_fin + 1):
-        _copiar(ws.cell(r, c), wsn.cell(fila_nueva, c))
-      wsn.cell(fila_nueva, c_tipo).value = g["etiqueta"]
-      if i % 2 == 0:  # sombreado alterno por grupo
-        for c in range(1, c_tipo + 1):
-          cel = wsn.cell(fila_nueva, c)
-          if cel.fill is None or cel.fill.fill_type is None:
-            cel.fill = _relleno(C_GRUPO_ALTERNO)
-      if irregular:  # días irregulares: amarillo
-        for c in list(c_dias) + [c_tipo]:
-          wsn.cell(fila_nueva, c).fill = _relleno(C_IRREGULAR)
-      if sin_tol:  # tolerancia vacía: naranja
-        for c in (c_tol, c_tipo):
-          wsn.cell(fila_nueva, c).fill = _relleno(C_SIN_TOLERANCIA)
-      if rara:  # tolerancia distinta a las 3 principales: rojo
-        for c in (c_tol, c_tipo):
-          wsn.cell(fila_nueva, c).fill = _relleno(C_TOLERANCIA_RARA)
-      fila_nueva += 1
 
-  # Aplicar formato unificado de centrado y bordes a toda la tabla
-  thin_side = Side(style="thin", color="BFBFBF")
-  table_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
-  center_align = Alignment(horizontal="center", vertical="center")
-
-  for r_idx in range(1, fila_nueva):
-    for c_idx in range(1, c_tipo + 1):
-      cell = wsn.cell(row=r_idx, column=c_idx)
-      cell.alignment = center_align
-      cell.border = table_border
-
-  for c in range(1, c_fin + 1):
-    letra = get_column_letter(c)
-    dim = ws.column_dimensions.get(letra)
-    if dim is not None and dim.width:
-      wsn.column_dimensions[letra].width = dim.width
-  wsn.column_dimensions[get_column_letter(c_tipo)].width = (
-      max(len(g["etiqueta"]) for g in ordenados) + 2
+with tab_util:
+  # ---- Corrector de conversión Nitro (PDF -> Excel)
+  st.subheader("Corregir salto de página en conversión Nitro (PDF → Excel)")
+  st.caption(
+      "Sincroniza los empleados del PDF original con el Excel convertido por"
+      " Nitro, reinsertando únicamente la primera línea de empleado omitida en"
+      " cada salto de página manteniendo intacto el formato."
   )
-  wsn.freeze_panes = "A2"
-
-  # Verificación de integridad
-  def _fila(hoja, r):
-    return repr(tuple(_valor_comparable(hoja.cell(r, c).value) for c in range(1, c_fin + 1)))
-
-  if sorted(_fila(ws, r) for r in filas) != sorted(
-      _fila(wsn, r) for r in range(2, fila_nueva)
+  u_pdf = st.file_uploader("PDF Original de Inspector", type=["pdf"], key="u_nitro_pdf")
+  u_excel = st.file_uploader("Excel Convertido por Nitro", type=["xlsx"], key="u_nitro_excel")
+  if st.button(
+      "Corregir conversion de Nitro",
+      key="u_nitro_btn",
+      disabled=not (u_pdf and u_excel),
   ):
-    raise RuntimeError(
-        "La verificación falló: las filas del resultado no coinciden con el"
-        " original. No se generó el archivo."
+    try:
+      with st.spinner("Procesando conversión Nitro…"):
+        _guardar("u_nitro_res", p.util_corregir_nitro(u_pdf, u_excel))
+    except Exception as e:  # noqa: BLE001
+      st.error(f"No pude procesar los archivos: {e}")
+
+  if "u_nitro_res" in st.session_state:
+    bytes_nitro, n_insertados = st.session_state["u_nitro_res"]
+    st.success(
+        "¡Proceso completado con éxito! Se reinsertaron"
+        f" {n_insertados} empleados omitidos por Nitro."
+    )
+    st.download_button(
+        "Descargar Excel Corregido",
+        bytes_nitro,
+        file_name="REPORTE_ASISTENCIA_CORREGIDO.xlsx",
+        mime=XLSX,
+        key="u_nitro_dl",
     )
 
-  # Resto de avisos y retorno...
-  if n_irregulares:
-    avisos.append(
-        f"{n_irregulares} empleado(s) con días irregulares (en amarillo): su"
-        " combinación de * y D no corresponde a ninguna regla o no coincide con"
-        " su hora de entrada."
-    )
-  if n_tol_rara:
-    avisos.append(
-        f"{n_tol_rara} empleado(s) con una tolerancia distinta a BASIFICADOS,"
-        " EVENTUALES y GUARDERIA (en rojo)."
-    )
-  if n_sin_tol:
-    avisos.append(f"{n_sin_tol} empleado(s) sin tolerancia (en naranja).")
+  st.divider()
 
-  def _dias(r):
-    return "".join(
-        "-" if es_vacio(ws.cell(r, c).value) else str(ws.cell(r, c).value).strip()
-        for c in c_dias
-    )
-
-  def _alerta(g):
-    if g["clase"] == "IRREGULAR":
-      return "DÍAS IRREGULARES"
-    if g["tipo"] not in _ORDEN_TIPOS:
-      return "TOLERANCIA DISTINTA"
-    if g["tipo"] == "SIN TOLERANCIA" and g["clase"] != "SIN HORARIO":
-      return "SIN TOLERANCIA"
-    return ""
-
-  resumen = pd.DataFrame([
-      {
-          "TIPO DE HORARIO": g["etiqueta"],
-          "EMPLEADOS": len(g["filas"]),
-          "ENTRADA": normalizar_hora(ws.cell(g["r0"], ini).value),
-          "SALIDA": normalizar_hora(ws.cell(g["r0"], ini + 1).value),
-          "DÍAS (L a D)": _dias(g["r0"]),
-          "HORAS DE TRABAJO": normalizar_hora(ws.cell(g["r0"], ini + 9).value),
-          "TOLERANCIAS": valor(ws.cell(g["r0"], c_tol).value),
-          "ALERTA": _alerta(g),
-      }
-      for g in ordenados
-  ])
-  buf = io.BytesIO()
-  wn.save(buf)
-  return buf.getvalue(), resumen, avisos, len(filas)
-
-def util_filtrar_por_quincenas(f_q1, f_q2, f_final):
-  """Filtra el archivo final conservando formatos y estilos originales,
-  comparando la columna B contra la columna A de la Quincena 1 y opcionalmente Q2,
-  y copia las columnas PUESTO, DESCR, TIPOTRAB, RAMA y REGION a partir de la columna Z.
-  """
-  def _cargar_datos_quincena(archivo):
-    if archivo is None:
-      return {}
-    if hasattr(archivo, "seek"):
-      archivo.seek(0)
-    wb_q = load_workbook(archivo, data_only=True)
-    ws_q = wb_q.active
-    
-    idx_enc = None
-    cols_map = {}
-    target_headers = ["PUESTO", "DESCR", "TIPOTRAB", "RAMA", "REGION"]
-    
-    # Buscar dinámicamente la fila de encabezados y las columnas requeridas
-    for r in range(1, min(15, ws_q.max_row + 1)):
-      row_vals = [ws_q.cell(r, c).value for c in range(1, ws_q.max_column + 1)]
-      row_strs = [str(v).strip().upper() if v is not None else "" for v in row_vals]
-      if "TARJETA" in row_strs:
-        idx_enc = r
-        for idx_c, val in enumerate(row_strs, start=1):
-          if val == "TARJETA":
-            cols_map["TARJETA"] = idx_c
-          elif val in target_headers:
-            cols_map[val] = idx_c
-        break
-        
-    if idx_enc is None or "TARJETA" not in cols_map:
-      idx_enc = 1
-      cols_map["TARJETA"] = 1
-      for c in range(1, ws_q.max_column + 1):
-        v = str(ws_q.cell(1, c).value or "").strip().upper()
-        if v in target_headers:
-          cols_map[v] = c
-
-    datos_quin = {}
-    for r in range(idx_enc + 1, ws_q.max_row + 1):
-      t_val = ws_q.cell(r, cols_map["TARJETA"]).value
-      k = clave(t_val)
-      if not k:
-        continue
-      
-      info = {}
-      for h in target_headers:
-        col_idx = cols_map.get(h)
-        info[h] = ws_q.cell(r, col_idx).value if col_idx else None
-      datos_quin[k] = info
-      
-    return datos_quin
-
-  # Cargar datos dinámicos de las quincenas
-  q1_dict = _cargar_datos_quincena(f_q1)
-  q2_dict = _cargar_datos_quincena(f_q2) if f_q2 is not None else {}
-
-  if hasattr(f_final, "seek"):
-    f_final.seek(0)
-  wb_orig = load_workbook(f_final, data_only=True)
-  ws_orig = wb_orig.active
-
-  if ws_orig.max_row < 2:
-    raise ValueError("El archivo final no tiene filas de datos.")
-
-  wb_new = Workbook()
-  ws_new = wb_new.active
-  ws_new.title = "FILTRADO_QUINCENAS"
-
-  max_col_orig = ws_orig.max_column
-  # 1. Copiar encabezado original (fila 1) con estilos
-  for col_c in range(1, max_col_orig + 1):
-    src_cell = ws_orig.cell(row=1, column=col_c)
-    dest_cell = ws_new.cell(row=1, column=col_c, value=src_cell.value)
-    if src_cell.has_style:
-      dest_cell.font = copy.copy(src_cell.font)
-      dest_cell.fill = copy.copy(src_cell.fill)
-      dest_cell.border = copy.copy(src_cell.border)
-      dest_cell.alignment = copy.copy(src_cell.alignment)
-      dest_cell.number_format = src_cell.number_format
-
-  # Escribir encabezados para las columnas adicionales a partir de la Z (columna 26)
-  target_headers = ["PUESTO", "DESCR", "TIPOTRAB", "RAMA", "REGION"]
-  for i, h in enumerate(target_headers):
-    col_idx = 26 + i
-    dest_cell = ws_new.cell(row=1, column=col_idx, value=h)
-    dest_cell.font = Font(bold=True)
-    dest_cell.alignment = Alignment(horizontal="center", vertical="center")
-
-  filas_copiadas = 0
-  total_filas = 0
-  new_row_idx = 2
-
-  # 2. Filtrar y copiar filas manteniendo formatos originales y agregando los datos dinámicos
-  for r in range(2, ws_orig.max_row + 1):
-    if all(es_vacio(ws_orig.cell(r, c).value) for c in range(1, max_col_orig + 1)):
-      continue
-    total_filas += 1
-
-    # Columna B del archivo final (índice 2)
-    val_b = ws_orig.cell(r, 2).value
-    k_emp = clave(val_b)
-
-    info_match = None
-    if k_emp and k_emp in q1_dict:
-      info_match = q1_dict[k_emp]
-    elif k_emp and k_emp in q2_dict:
-      info_match = q2_dict[k_emp]
-
-    if info_match is not None:
-      filas_copiadas += 1
-      # Copiar las columnas originales del archivo final
-      for col_c in range(1, max_col_orig + 1):
-        src_cell = ws_orig.cell(row=r, column=col_c)
-        dest_cell = ws_new.cell(row=new_row_idx, column=col_c, value=src_cell.value)
-        if src_cell.has_style:
-          dest_cell.font = copy.copy(src_cell.font)
-          dest_cell.fill = copy.copy(src_cell.fill)
-          dest_cell.border = copy.copy(src_cell.border)
-          dest_cell.alignment = copy.copy(src_cell.alignment)
-          dest_cell.number_format = copy.copy(src_cell.number_format)
-
-      # Pegar PUESTO, DESCR, TIPOTRAB, RAMA y REGION a partir de la celda Z (columna 26)
-      for i, h in enumerate(target_headers):
-        ws_new.cell(row=new_row_idx, column=26 + i, value=info_match.get(h))
-
-      new_row_idx += 1
-
-  for col_letter, dim in ws_orig.column_dimensions.items():
-    ws_new.column_dimensions[col_letter].width = dim.width
-
-  ws_new.freeze_panes = "A2"
-  buf = io.BytesIO()
-  wb_new.save(buf)
-  return buf.getvalue(), filas_copiadas, total_filas
-
-# --------------------------------------------------------------------------
-# Archivo de la quincena (lo usa la utilidad «Obtener personal EN FIRMA»)
-# --------------------------------------------------------------------------
-def leer_quincena(archivo):
-  """Lee la quincena (Hoja1). Detecta el renglón de encabezados por la columna «tarjeta»."""
-  filas = leer_hoja1(archivo)
-  idx = None
-  for i, r in enumerate(filas[:15]):
-    if "tarjeta" in [str(c).strip().lower() for c in r if not es_vacio(c)]:
-      idx = i
-      break
-  if idx is None:
-    raise ValueError("En el archivo de la quincena no encontré la columna «tarjeta» "
-            "(debe estar en los primeros renglones de la Hoja1).")
-  enc = ["" if es_vacio(c) else str(c).strip().lower() for c in filas[idx]]
-  pos = {n: enc.index(a) for n, alias, _ in COL_QUINCENA for a in alias if a in enc}
-  faltan = [n for n, _, opc in COL_QUINCENA if not opc and n not in pos]
-  if faltan:
-    raise ValueError("A la quincena le faltan columnas: " + ", ".join(faltan))
-  i_tar = enc.index("tarjeta")
-  i_nom = enc.index("nombre") if "nombre" in enc else None
-
-  registros = []
-  for r in filas[idx + 1:]:
-    t = clave(celda(r, i_tar))
-    if not t:
-      continue
-    reg = {"TARJETA": t, "NOMBRE": valor(celda(r, i_nom)) if i_nom is not None else None}
-    for n, i in pos.items():
-      reg[n] = valor(celda(r, i))
-    registros.append(reg)
-  columnas = [n for n, _, _ in COL_QUINCENA if n in pos]
-  return registros, columnas
-
-
-def _norm_nombre(s) -> str:
-  s = unicodedata.normalize("NFKD", str(s or "").upper())
-  s = "".join(ch for ch in s if ch.isalpha() or ch == " ")
-  return " ".join(sorted(s.split()))      # sin importar el orden nombre/apellidos
-
-
-def elegir_fila(candidatas, nombre):
-  """Si una tarjeta está repetida en la quincena, elige la fila con nombre más parecido."""
-  if len(candidatas) == 1:
-    return candidatas[0]
-  objetivo = _norm_nombre(nombre)
-  return max(candidatas,
-       key=lambda c: SequenceMatcher(None, objetivo, _norm_nombre(c.get("NOMBRE"))).ratio())
-
-
-def util_personal_en_firma(f_todos, f_quincena):
-  """Macro 2: de todo el personal inactivo del sistema (export de MySQL, Hoja1, tarjeta en la
-
-  columna A) obtiene a quienes aparecen en la quincena. Esa lista es la que hay
-  que agregar a mano
-  en el reporte de Inspector (con «mostrar empleados inactivos»).
-  """
-  filas = leer_tabla(f_todos)
-  quin, cols_q = leer_quincena(f_quincena)
-  indice = {}
-  for q in quin:
-    indice.setdefault(q["TARJETA"], []).append(q)
-  cols = [c for c in COLS_EN_FIRMA if c in ("TARJETA", "NOMBRE") or c in cols_q]
-  salida, vistos = [], set()
-  for r in filas:
-    t = clave(celda(r, 0))
-    if not t or t in vistos or t not in indice:
-      continue
-    vistos.add(t)
-    nombre = " ".join(
-        str(x) for x in (celda(r, 2), celda(r, 3)) if not es_vacio(x)
-    )
-    q = elegir_fila(indice[t], nombre)
-    salida.append([t if c == "TARJETA" else q.get(c) for c in cols])
-  wb = Workbook()
-  ws = wb.active
-  ws.title = "EN FIRMA"
-  ws.append(cols)
-  for c in range(1, len(cols) + 1):
-    x = ws.cell(row=1, column=c)
-    x.font = Font(bold=True)
-    x.alignment = Alignment(horizontal="center", vertical="center")
-  for f in salida:
-    ws.append(f)
-  _autoajustar(ws)
-  buf = io.BytesIO()
-  wb.save(buf)
-  return buf.getvalue(), pd.DataFrame(salida, columns=cols, dtype=object)
-
-
-def util_buscar_gua(archivo, texto="gua", columna=5):
-  """Macro 8: copia las columnas A:D de las filas cuya columna E contiene `texto`."""
-  filas = leer_hoja1(archivo)
-  wb = Workbook()
-  ws = wb.active
-  ws.title = "RESULTADO"
-  if filas:
-    ws.append([celda(filas[0], j) for j in range(4)])  # encabezados A:D
-  encontradas = []
-  for r in filas[1:]:
-    v = celda(r, columna - 1)
-    if not es_vacio(v) and texto.lower() in str(v).lower():
-      fila = [celda(r, j) for j in range(4)]
-      encontradas.append(fila)
-      ws.append(fila)
-  _autoajustar(ws)
-  buf = io.BytesIO()
-  wb.save(buf)
-  cab = (
-      _unicos([
-          (("" if es_vacio(c) else str(c)) or f"col {i + 1}")
-          for i, c in enumerate([celda(filas[0], j) for j in range(4)])
-      ])
-      if filas
-      else None
+# ---- Filtrar archivo final por quincenas
+  st.subheader("Filtrar archivo final por pago en quincenas")
+  st.caption(
+      "Compara la columna B del archivo final contra la columna A de la Quincena 1 y, "
+      "si se proporciona, contra la Quincena 2. Genera un nuevo archivo con sus formatos "
+      "originales omitiendo a los empleados que no aparezcan en las quincenas."
   )
-  return buf.getvalue(), pd.DataFrame(encontradas, columns=cab)
+  uf_q1 = st.file_uploader("Archivo de Quincena 1 (Hoja1)", type=["xlsx"], key="uf_q1")
+  uf_q2 = st.file_uploader("Archivo de Quincena 2 (Hoja1) — opcional", type=["xlsx"], key="uf_q2")
+  uf_fin = st.file_uploader("Archivo Final o Agrupado", type=["xlsx"], key="uf_fin")
 
+  if st.button("Filtrar por quincenas", key="uf_btn", disabled=not (uf_q1 and uf_fin)):
+    try:
+      with st.spinner("Procesando y filtrando registros..."):
+        bytes_uf, copiadas, total = p.util_filtrar_por_quincenas(uf_q1, uf_q2, uf_fin)
+        _guardar("uf_res", (bytes_uf, copiadas, total))
+    except ValueError as e:
+      st.error(str(e))
+    except Exception as e:
+      st.error(f"No pude procesar los archivos: {e}")
 
-def util_formato_quincena(archivo):
-  """Macro 9: reacomoda columnas. Origen A..U -> destino E..X:
-
-  E=A, F=B, G=C, H=D, I:K=E:G, L:X=I:U (la columna H del origen se descarta).
-  """
-  filas = leer_hoja1(archivo)
-  ultima = max(
-      (i for i, r in enumerate(filas) if not es_vacio(celda(r, 0))), default=-1
-  )
-  wb = Workbook()
-  ws = wb.active
-  ws.title = "QUINCENA"
-  for r in filas[: ultima + 1]:
-    dest = [None] * 24
-    dest[4], dest[5], dest[6], dest[7] = (
-        celda(r, 0),
-        celda(r, 1),
-        celda(r, 2),
-        celda(r, 3),
+  if "uf_res" in st.session_state:
+    bytes_uf, copiadas, total = st.session_state["uf_res"]
+    st.success(
+        f"¡Filtrado completado con éxito! Se conservaron {copiadas} de {total} empleados "
+        f"(se omitieron {total - copiadas} registros sin coincidencia en las quincenas)."
     )
-    dest[8:11] = [celda(r, 4), celda(r, 5), celda(r, 6)]
-    dest[11:24] = [celda(r, j) for j in range(8, 21)]
-    ws.append(dest)
-  buf = io.BytesIO()
-  wb.save(buf)
-  return buf.getvalue(), ultima + 1
+    st.download_button(
+        "Descargar archivo filtrado",
+        bytes_uf,
+        file_name="REPORTE_FILTRADO_QUINCENAS.xlsx",
+        mime=XLSX,
+        key="uf_dl",
+    )
 
-def util_analizar_reporte(archivo):
-  """Analiza el reporte para extraer el Turno (Columna T / índice 19),
-  Descr (Columna AA / índice 26) y Tipo de Trabajador (Columna AB / índice 27).
-  """
-  if hasattr(archivo, "seek"):
-    archivo.seek(0)
-  df = pd.read_excel(archivo, sheet_name=0, dtype=object)
-  if df.empty:
-    raise ValueError("El archivo está vacío.")
-  
-  cols = list(df.columns)
-  
-  # Búsqueda por nombre de encabezado o por posición absoluta de columna Excel (T=19, AA=26, AB=27)
-  c_turno = next((c for c in cols if str(c).strip().upper() == "TURNO"), cols[19] if len(cols) > 19 else None)
-  c_descr = next((c for c in cols if str(c).strip().upper() in ("DESCR", "DESCRIPCION", "DESCRIPCIÓN")), cols[26] if len(cols) > 26 else None)
-  c_tipotrab = next((c for c in cols if str(c).strip().upper() in ("TIPOTRAB", "TIPO DE TRABAJADOR", "TIPO_TRABAJADOR")), cols[27] if len(cols) > 27 else None)
-  
-  if not c_turno or not c_descr or not c_tipotrab:
-    raise ValueError("No se pudieron localizar las columnas requeridas (Turno en T, Descr en AA, Tipo de Trabajador en AB).")
+  # ---- Agrupar empleados por tipo de horario
+  st.subheader("Agrupar empleados por tipo de horario")
+  st.caption(
+      "Sube el reporte final. Junta a los empleados con el mismo horario"
+      " (columnas J a U) en un archivo nuevo con una sola hoja (AGRUPADO): copia"
+      " las columnas A a X y agrega en la Y el tipo de horario, por ejemplo"
+      " «MATUTINO LUNES A VIERNES BASIFICADOS 1» o «NOCTURNO A (L-Mi-V)"
+      " BASIFICADOS 1». Solo reordena; no agrega ni borra información."
+  )
+  u_agr = st.file_uploader(
+      "Reporte final (REPORTE_HORARIOS_FINAL.xlsx)",
+      type=["xlsx"],
+      key="u_agr_file",
+  )
+  if st.button(
+      "Agrupar por tipo de horario", key="u_agr_btn", disabled=u_agr is None
+  ):
+    try:
+      with st.spinner("Agrupando…"):
+        _guardar("u_agr_res", p.util_agrupar_horarios(u_agr))
+    except ValueError as e:
+      st.error(str(e))
+    except Exception as e:  # noqa: BLE001
+      st.error(f"No pude procesar el archivo: {e}")
+  if "u_agr_res" in st.session_state:
+    bytes_agr, resumen_agr, avisos_agr, n_agr = st.session_state["u_agr_res"]
+    st.success(
+        f"{n_agr} empleados agrupados en {len(resumen_agr)} tipos de horario."
+        " Verificado: mismas filas y valores que el original."
+    )
+    for a in avisos_agr:
+      st.warning(a)
+    st.caption(
+        "Colores en el archivo: azul suave = grupos alternos; amarillo = días"
+        " irregulares; naranja = sin tolerancia; rojo = tolerancia distinta a"
+        " las 3 principales."
+    )
+    st.dataframe(resumen_agr, hide_index=True)
+    st.download_button(
+        "Descargar reporte agrupado",
+        bytes_agr,
+        file_name="REPORTE_HORARIOS_AGRUPADO.xlsx",
+        mime=XLSX,
+        key="u_agr_dl",
+    )
+
+  st.divider()
+
+  # ---- Filtrar archivo final por tarjetas específicas
+  st.subheader("Filtrar archivo final por lista de tarjetas")
+  st.caption(
+      "Sube el reporte final e ingresa las tarjetas de los empleados que deseas "
+      "extraer separadas por comas (ejemplo: 1023, 1024, 1050). Se generará un nuevo "
+      "archivo copiando todas las columnas y formatos originales de las coincidencias."
+  )
+  u_ft_file = st.file_uploader("Reporte Final o Agrupado (.xlsx)", type=["xlsx"], key="u_ft_file")
+  u_ft_txt = st.text_area("Tarjetas a buscar (separadas por comas)", value="", placeholder="Ejemplo: 1023, 1024, 1050", key="u_ft_txt")
+
+  if st.button("Filtrar por tarjetas", key="u_ft_btn", disabled=not (u_ft_file and u_ft_txt.strip())):
+    try:
+      with st.spinner("Buscando y filtrando tarjetas..."):
+        _guardar("u_ft_res", p.util_filtrar_por_tarjetas(u_ft_file, u_ft_txt))
+    except ValueError as e:
+      st.error(str(e))
+    except Exception as e:
+      st.error(f"No pude procesar el archivo: {e}")
+
+  if "u_ft_res" in st.session_state:
+    bytes_ft, encontradas, total_buscadas, no_encontradas, df_vista_ft = st.session_state["u_ft_res"]
+    st.success(f"¡Filtrado completado! Se encontraron {encontradas} fila(s) de las {total_buscadas} tarjetas ingresadas.")
     
-  return df, c_turno, c_descr, c_tipotrab
+    if no_encontradas:
+      st.warning(f"Las siguientes {len(no_encontradas)} tarjetas no se encontraron en el archivo: {', '.join(no_encontradas)}")
 
+    if not df_vista_ft.empty:
+      st.dataframe(df_vista_ft, hide_index=True)
 
-def exportar_por_turno(df, col_turno, turno_seleccionado):
-  """Filtra el DataFrame por un turno específico (Columna T) y genera un Excel descargable."""
-  df_filtrado = df[df[col_turno].astype(str).str.strip().str.upper() == str(turno_seleccionado).strip().upper()].copy()
-  buf = io.BytesIO()
-  with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-    df_filtrado.to_excel(writer, index=False, sheet_name="REPORTE_TURNO")
-  return buf.getvalue(), len(df_filtrado)
+    st.download_button(
+        "Descargar reporte filtrado por tarjetas",
+        bytes_ft,
+        file_name="REPORTE_FILTRADO_TARJETAS.xlsx",
+        mime=XLSX,
+        key="u_ft_dl",
+    )
 
+  st.divider()
 
-def util_filtrar_por_tarjetas(f_final, texto_tarjetas):
-  """Filtra el archivo final conservando formatos originales según una lista de
-  tarjetas ingresadas como texto separadas por comas (buscando en la Columna A).
-  """
-  # 1. Limpiar y extraer la lista de tarjetas requeridas
-  tarjetas_raw = [t.strip() for t in texto_tarjetas.split(",") if t.strip()]
-  tarjetas_set = {clave(t) for t in tarjetas_raw if clave(t)}
-
-  if not tarjetas_set:
-    raise ValueError("No se ingresaron tarjetas válidas para filtrar.")
-
-  if hasattr(f_final, "seek"):
-    f_final.seek(0)
-  wb_orig = load_workbook(f_final, data_only=True)
-  ws_orig = wb_orig.active
-
-  if ws_orig.max_row < 2:
-    raise ValueError("El archivo final no tiene filas de datos.")
-
-  wb_new = Workbook()
-  ws_new = wb_new.active
-  ws_new.title = "FILTRADO_TARJETAS"
-
-  max_col_orig = ws_orig.max_column
-
-  # 2. Copiar encabezado (fila 1) con sus estilos originales
-  for col_c in range(1, max_col_orig + 1):
-    src_cell = ws_orig.cell(row=1, column=col_c)
-    dest_cell = ws_new.cell(row=1, column=col_c, value=src_cell.value)
-    if src_cell.has_style:
-      dest_cell.font = copy.copy(src_cell.font)
-      dest_cell.fill = copy.copy(src_cell.fill)
-      dest_cell.border = copy.copy(src_cell.border)
-      dest_cell.alignment = copy.copy(src_cell.alignment)
-      dest_cell.number_format = src_cell.number_format
-
-  filas_encontradas = 0
-  tarjetas_vistas = set()
-  datos_vista = []
   
-  # Usamos _unicos() para evitar el error de nombres de columnas duplicados en Streamlit/PyArrow
-  raw_headers = [str(ws_orig.cell(1, c).value or f"Col {c}") for c in range(1, max_col_orig + 1)]
-  headers = _unicos(raw_headers)
-  
-  new_row_idx = 2
 
-  # 3. Filtrar las filas por coincidencia en la columna A (índice 1)
-  for r in range(2, ws_orig.max_row + 1):
-    if all(es_vacio(ws_orig.cell(r, c).value) for c in range(1, max_col_orig + 1)):
-      continue
+  # ---- Obtener personal en firma (macro 2)
+  st.subheader("Obtener personal EN FIRMA")
+  st.caption(
+      "Cruza el personal inactivo del sistema (export de MySQL) con la"
+      " quincena. La lista resultante es la que hay que agregar a mano en el"
+      " reporte de Inspector (con «mostrar empleados inactivos»)."
+  )
+  u2a = st.file_uploader(
+      "Export de MySQL del personal inactivo (tarjeta en la columna A)",
+      type=["csv", "xlsx"],
+      key="u2_todos",
+  )
+  u2b = st.file_uploader(
+      "Archivo de la quincena (Hoja1)", type=["xlsx"], key="u2_quin"
+  )
+  if st.button(
+      "Obtener personal en firma", key="u2_btn", disabled=not (u2a and u2b)
+  ):
+    try:
+      _guardar("u2_res", p.util_personal_en_firma(u2a, u2b))
+    except ValueError as e:
+      st.error(str(e))
+    except Exception as e:  # noqa: BLE001
+      st.error(f"No pude procesar los archivos: {e}")
+  if "u2_res" in st.session_state:
+    bytes2, vista2 = st.session_state["u2_res"]
+    st.success(f"{len(vista2)} persona(s) inactivas con pago en la quincena.")
+    st.dataframe(vista2, hide_index=True)
+    st.download_button(
+        "Descargar lista EN FIRMA",
+        bytes2,
+        file_name="EN_FIRMA.xlsx",
+        mime=XLSX,
+        key="u2_dl",
+    )
 
-    # Leemos la celda de la Columna A (índice 1)
-    val_a = ws_orig.cell(r, 1).value
-    k_emp = clave(val_a)
+  st.divider()
 
-    if k_emp and k_emp in tarjetas_set:
-      filas_encontradas += 1
-      tarjetas_vistas.add(k_emp)
-      
-      fila_valores = []
-      for col_c in range(1, max_col_orig + 1):
-        src_cell = ws_orig.cell(row=r, column=col_c)
-        dest_cell = ws_new.cell(row=new_row_idx, column=col_c, value=src_cell.value)
-        fila_valores.append(src_cell.value)
-        
-        if src_cell.has_style:
-          dest_cell.font = copy.copy(src_cell.font)
-          dest_cell.fill = copy.copy(src_cell.fill)
-          dest_cell.border = copy.copy(src_cell.border)
-          dest_cell.alignment = copy.copy(src_cell.alignment)
-          dest_cell.number_format = src_cell.number_format
+  # ---- Buscar «gua» (macro 8)
+  st.subheader("Buscar «gua» en exportado del sistema")
+  st.caption(
+      "Copia las columnas A a D de las filas cuya columna E contiene el texto"
+      " buscado."
+  )
+  u8 = st.file_uploader(
+      "Excel exportado del sistema (Hoja1)", type=["xlsx"], key="u8_file"
+  )
+  ca, cb = st.columns(2)
+  texto = ca.text_input("Texto a buscar", value="gua", key="u8_txt")
+  col_n = cb.number_input(
+      "Número de columna donde buscar (E = 5)",
+      min_value=1,
+      value=5,
+      step=1,
+      key="u8_col",
+  )
+  if st.button(
+      "Ejecutar búsqueda", key="u8_btn", disabled=u8 is None or not texto
+  ):
+    try:
+      _guardar("u8_res", p.util_buscar_gua(u8, texto, int(col_n)))
+    except Exception as e:  # noqa: BLE001
+      st.error(f"No pude procesar el archivo: {e}")
+  if "u8_res" in st.session_state:
+    datos8, vista8 = st.session_state["u8_res"]
+    st.success(f"{len(vista8)} fila(s) encontradas.")
+    st.dataframe(vista8, hide_index=True)
+    st.download_button(
+        "Descargar resultado",
+        datos8,
+        file_name="RESULTADO_GUA.xlsx",
+        mime=XLSX,
+        key="u8_dl",
+    )
+
+  st.divider()
+
+  # ---- Formato de quincena (macro 9)
+  st.subheader("Dar formato necesario a la quincena")
+  st.caption(
+      "Reacomoda las columnas del archivo de la quincena (origen A:U → destino"
+      " E:X; la columna H del origen no se copia)."
+  )
+  u9 = st.file_uploader(
+      "Excel de la quincena (Hoja1)", type=["xlsx"], key="u9_file"
+  )
+  if st.button("Dar formato", key="u9_btn", disabled=u9 is None):
+    try:
+      _guardar("u9_res", p.util_formato_quincena(u9))
+    except Exception as e:  # noqa: BLE001
+      st.error(f"No pude procesar el archivo: {e}")
+  if "u9_res" in st.session_state:
+    st.success(f"Listo: {st.session_state['u9_res'][1]} fila(s) reacomodadas.")
+    st.download_button(
+        "Descargar quincena con formato",
+        st.session_state["u9_res"][0],
+        file_name="QUINCENA_FORMATO.xlsx",
+        mime=XLSX,
+        key="u9_dl",
+    )
+
+# ----------------------------------------------------------------------------
+# PESTAÑA 3: análisis gráfico interactivo y descarga por turno (Columna T)
+# ----------------------------------------------------------------------------
+with tab_analisis:
+  st.subheader("Análisis de datos, métricas y gráficos por Turno")
+  st.caption(
+      "Sube tu archivo final para visualizar el desglose de la columna AA (Descr) "
+      "frente a la columna AB (Tipo de Trabajador) filtrado por Turno (Columna T)."
+  )
+
+  u_ana = st.file_uploader("Sube tu archivo para análisis", type=["xlsx"], key="u_ana_file")
+
+  if u_ana is not None:
+    try:
+      df_ana, c_turno, c_descr, c_tipotrab = p.util_analizar_reporte(u_ana)
+      st.success(f"¡Archivo cargado con éxito! {len(df_ana)} registros procesados.")
+
+      # Métricas generales arriba
+      m1, m2, m3 = st.columns(3)
+      m1.metric("Total de Registros", len(df_ana))
+      turnos_unicos = sorted(df_ana[c_turno].dropna().astype(str).unique())
+      m2.metric("Turnos Detectados (Col. T)", len(turnos_unicos))
+      m3.metric("Descripciones Únicas (Col. AA)", df_ana[c_descr].dropna().nunique())
+
+      st.divider()
+
+      # Selector de Turno (Columna T)
+      st.subheader("Desglose interactivo por Turno")
+      turno_sel = st.selectbox("Selecciona el Turno (Columna T):", options=turnos_unicos, key="sel_turno_ana")
+
+      if turno_sel:
+        df_turno = df_ana[df_ana[c_turno].astype(str) == str(turno_sel)]
+
+        # Agrupación: número de registros por Descripción (AA) y Tipo de Trabajador (AB)
+        tabla_resumen = df_turno.groupby([c_descr, c_tipotrab]).size().reset_index(name="CANTIDAD")
+
+        st.markdown(f"**Registros para el turno `{turno_sel}`** ({len(df_turno)} empleados en total):")
+        st.dataframe(tabla_resumen, hide_index=True)
+
+        # Gráfico interactivo completo con Plotly Express
+        if not tabla_resumen.empty:
+          st.markdown("##### 📊 Distribución por Descripción (AA) y Tipo de Trabajador (AB)")
           
-      datos_vista.append(fila_valores)
-      new_row_idx += 1
+          # Calculamos un alto dinámico para que siempre haya espacio suficiente si hay muchas categorías
+          num_categorias = tabla_resumen[c_descr].nunique()
+          alto_grafico = max(450, num_categorias * 35)
 
-  # Copiar dimensiones de columnas originales
-  for col_letter, dim in ws_orig.column_dimensions.items():
-    ws_new.column_dimensions[col_letter].width = dim.width
+          # Gráfico de barras horizontales (evita que los nombres largos de la columna AA se corten)
+          fig = px.bar(
+              tabla_resumen,
+              y=c_descr,
+              x="CANTIDAD",
+              color=c_tipotrab,
+              orientation="h",
+              title=f"Desglose de personal - Turno: {turno_sel}",
+              labels={
+                  c_descr: "Descripción (Columna AA)",
+                  "CANTIDAD": "Número de Empleados",
+                  c_tipotrab: "Tipo de Trabajador (Columna AB)"
+              },
+              text="CANTIDAD" # Muestra la cifra exacta sobre/dentro de cada barra
+          )
 
-  ws_new.freeze_panes = "A2"
-  buf = io.BytesIO()
-  wb_new.save(buf)
+          # Personalización visual de ejes, márgenes y leyenda
+          fig.update_layout(
+              height=alto_grafico,
+              yaxis={'categoryorder': 'total ascending'}, # Ordena de mayor a menor cantidad
+              xaxis_title="Número de Empleados",
+              yaxis_title="Descripción (Columna AA)",
+              legend_title_text="Tipo de Trabajador",
+              margin=dict(l=20, r=20, t=50, b=50),
+              hovermode="closest"
+          )
+          fig.update_traces(textposition="outside")
 
-  # Identificar tarjetas no localizadas en el archivo
-  no_encontradas = [t for t in tarjetas_raw if clave(t) not in tarjetas_vistas]
-  df_vista = pd.DataFrame(datos_vista, columns=headers, dtype=object) if datos_vista else pd.DataFrame()
+          st.plotly_chart(fig, use_container_width=True)
 
-  return buf.getvalue(), filas_encontradas, len(tarjetas_set), no_encontradas, df_vista
+        st.divider()
+
+        # Botón opcional para descargar únicamente ese turno
+        bytes_turno, n_turno = p.exportar_por_turno(df_ana, c_turno, turno_sel)
+        st.download_button(
+            label=f"📥 Descargar reporte en Excel para el turno {turno_sel} ({n_turno} registros)",
+            data=bytes_turno,
+            file_name=f"REPORTE_TURNO_{str(turno_sel).replace(' ', '_')}.xlsx",
+            mime=XLSX,
+            key=f"dl_turno_{turno_sel}"
+        )
+
+    except Exception as e:
+      st.error(f"No se pudo procesar el archivo para análisis: {e}")
+
+# -------Firma
+import base64
+import streamlit as st
+
+# ------- Firma flotante en la esquina superior izquierda
+url_imagen_drive = "https://i.redd.it/snoovatar/avatars/98e5bfa6-95f3-46d8-8754-7a64c0099533.png"
+enlace_perfil = "https://share.streamlit.io/user/danyflow"
+
+firma_html = f"""
+<style>
+.firma-flotante-link {{
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 999999;
+    text-decoration: none;
+}}
+
+.firma-flotante {{
+    display: flex;
+    align-items: center;
+    background: #06b6d4;
+    color: #ffffff;
+    width: 44px;
+    height: 44px;
+    padding: 6px;
+    border-radius: 50px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    border: 1px solid #0891b2;
+    font-family: var(--font, sans-serif);
+    font-size: 13px;
+    overflow: hidden;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease, background 0.3s ease, padding 0.3s ease;
+    cursor: pointer;
+    white-space: nowrap;
+}}
+
+.firma-flotante:hover {{
+    width: max-content; 
+    background: #0891b2; 
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    padding-right: 16px; 
+}}
+
+.firma-flotante img {{
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 1.5px solid rgba(255, 255, 255, 0.9);
+}}
+
+.firma-texto {{
+    margin-left: 12px;
+    opacity: 0;
+    transition: opacity 0.25s ease 0.1s;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: left;
+    line-height: 1.3;
+}}
+
+.firma-flotante:hover .firma-texto {{
+    opacity: 1;
+}}
+
+.firma-titulo {{
+    font-weight: 600;
+    font-size: 12px;
+    color: #ffffff;
+}}
+
+.firma-sub {{
+    font-size: 10px;
+    color: #ecfeff;
+}}
+</style>
+
+<a href="{enlace_perfil}" target="_blank" class="firma-flotante-link" title="Visitar perfil de Streamlit">
+    <div class="firma-flotante">
+        <img src="{url_imagen_drive}" alt="Dany FloVel">
+        <div class="firma-texto">
+            <span class="firma-titulo">Dany FloVel</span>
+            <span class="firma-sub">⚡ Ver perfil ⚡</span>
+        </div>
+    </div>
+</a>
+"""
+
+st.markdown(firma_html, unsafe_allow_html=True)
