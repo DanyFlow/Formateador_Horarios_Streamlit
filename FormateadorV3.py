@@ -417,13 +417,13 @@ with tab_util:
   st.divider()
 
   # ---- Buscar «gua» (macro 8)
-  st.subheader("Buscar «Guarderia» en exportado del sistema")
+  st.subheader("Buscar personal con horario de Guarderia en reporte final")
   st.caption(
       "Copia las columnas A a D de las filas cuya columna E contiene el texto"
       " buscado."
   )
   u8 = st.file_uploader(
-      "Excel exportado del sistema (Hoja1)", type=["xlsx"], key="u8_file"
+      "Reporte final", type=["xlsx"], key="u8_file"
   )
   ca, cb = st.columns(2)
   texto = ca.text_input("Texto a buscar", value="Guardería", key="u8_txt")
