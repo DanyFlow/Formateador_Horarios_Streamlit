@@ -67,7 +67,7 @@ pip install -r requirements.txt
 streamlit run FormateadorV3.py
 ```
 
-Se abre en `http://localhost:8501`. También se puede usar desde otros equipos o el celular dentro de la misma red local, o desplegarla en Streamlit Community Cloud.
+Se abre en `https://hgo-formateador-horarios-inspector.streamlit.app/`. También se puede usar desde otros equipos dentro de la misma red local en `http://localhost:8501`.
 
 ---
 
