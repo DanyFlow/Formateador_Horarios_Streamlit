@@ -417,7 +417,7 @@ with tab_util:
   st.divider()
 
   # ---- Buscar «gua» (macro 8)
-  st.subheader("Buscar «gua» en exportado del sistema")
+  st.subheader("Buscar «Guarderia» en exportado del sistema")
   st.caption(
       "Copia las columnas A a D de las filas cuya columna E contiene el texto"
       " buscado."
