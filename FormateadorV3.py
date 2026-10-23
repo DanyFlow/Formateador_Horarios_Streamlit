@@ -426,7 +426,7 @@ with tab_util:
       "Excel exportado del sistema (Hoja1)", type=["xlsx"], key="u8_file"
   )
   ca, cb = st.columns(2)
-  texto = ca.text_input("Texto a buscar", value="gua", key="u8_txt")
+  texto = ca.text_input("Texto a buscar", value="Guarderia", key="u8_txt")
   col_n = cb.number_input(
       "Número de columna donde buscar (E = 5)",
       min_value=1,
