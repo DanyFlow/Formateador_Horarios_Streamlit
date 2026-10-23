@@ -419,7 +419,7 @@ with tab_util:
   # ---- Buscar «gua» (macro 8)
   st.subheader("Buscar personal con horario de Guarderia en reporte final")
   st.caption(
-      "Copia las columnas A a D de las filas cuya columna E contiene el texto"
+      "Copia las columnas A a D de las filas cuya columna de Tolerancias contiene el texto"
       " buscado."
   )
   u8 = st.file_uploader(
