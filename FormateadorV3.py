@@ -217,7 +217,7 @@ def _guardar(clave_estado, valor):
 
 with tab_util:
   # ---- Corrector de conversión Nitro (PDF -> Excel)
-  st.subheader("Corregir salto de página en conversión Nitro (PDF → Excel)")
+  st.subheader("1 - Corregir salto de página en conversión Nitro (PDF → Excel)")
   st.caption(
       "Sincroniza los empleados del PDF original con el Excel convertido por"
       " Nitro, reinsertando únicamente la primera línea de empleado omitida en"
@@ -254,7 +254,7 @@ with tab_util:
 
   st.divider()
       # ---- Agrupar empleados por tipo de horario
-  st.subheader("Agrupar empleados por tipo de horario")
+  st.subheader("2 - Agrupar empleados por tipo de horario")
   st.caption(
       "Sube el reporte final. Junta a los empleados con el mismo horario"
       " (columnas J a U) en un archivo nuevo con una sola hoja (AGRUPADO): copia"
@@ -302,11 +302,9 @@ with tab_util:
   st.divider()
 
 # ---- Filtrar archivo final por quincenas
-  st.subheader("Filtrar archivo final por pago en quincenas")
+  st.subheader("3 - Filtrar archivo final por pago en quincenas")
   st.caption(
-      "Compara la columna B del archivo final contra la columna A de la Quincena 1 y, "
-      "si se proporciona, contra la Quincena 2. Genera un nuevo archivo con sus formatos "
-      "originales omitiendo a los empleados que no aparezcan en las quincenas."
+      "Compara el archivo generado en el pasoa anterior con los trabajadores activos en la quincena a subir, con la opcion de subir una segunda quincena para descartar trabajadores que no aparezcan por encontrarse en descanso olbigatorio"
   )
   uf_q1 = st.file_uploader("Archivo de Quincena 1 (Hoja1)", type=["xlsx"], key="uf_q1")
   uf_q2 = st.file_uploader("Archivo de Quincena 2 (Hoja1) — opcional", type=["xlsx"], key="uf_q2")
@@ -337,12 +335,12 @@ with tab_util:
     )
 
   # ---- Agrupar por tipo de horario (Y) y UR (I)
-  st.subheader("Agrupar por tipo de horario y UR")
+  st.subheader("4 - Agrupar por tipo de horario y UR")
   st.caption(
-      "Sube el reporte final ya agrupado por tipo de horario y re ordena de acuerdo a UR y Horario"
+      "Sube el reporte final ya agrupado por tipo de horario y re ordena de acuerdo a UR y Horario con 2 opciones de descarga distintas"
   )
   u_ur = st.file_uploader(
-      "Opción 1 - Reporte final agrupado (columna Y = TIPO DE HORARIO)",
+      "📥 Opción 1 - Reporte final agrupado (columna Y = TIPO DE HORARIO)",
       type=["xlsx"],
       key="u_ur_file",
   )
@@ -379,7 +377,7 @@ with tab_util:
   # Segunda opción: pestañas por tipo GENERAL + UR
   st.markdown("---")
   st.markdown(
-      "**Opción 2 — Varias pestañas (tipo general + UR)**  \n"
+      " 📥 Opción 2 — Varias pestañas (tipo general + UR)**  \n"
       "Unifica las variantes numeradas y de tolerancia "
   )
   if st.button(
@@ -422,7 +420,7 @@ with tab_util:
   st.divider()
 
   # ---- Filtrar archivo final por tarjetas específicas
-  st.subheader("Filtrar archivo final por lista de tarjetas")
+  st.subheader("5 - Filtrar archivo final por lista de tarjetas")
   st.caption(
       "Sube el reporte final e ingresa las tarjetas de los empleados que deseas "
       "extraer separadas por comas (ejemplo: 1023, 1024, 1050). Se generará un nuevo "
@@ -463,7 +461,7 @@ with tab_util:
   
 
   # ---- Obtener personal en firma (macro 2)
-  st.subheader("Obtener personal EN FIRMA")
+  st.subheader("6 - Obtener personal EN FIRMA")
   st.caption(
       "Cruza el personal inactivo del sistema (export de MySQL) con la"
       " quincena. La lista resultante es la que hay que agregar a mano en el"
@@ -501,7 +499,7 @@ with tab_util:
   st.divider()
 
   # ---- Buscar «gua» (macro 8)
-  st.subheader("Buscar personal con horario Guarderia")
+  st.subheader("7 - Buscar personal con horario Guarderia")
   st.caption(
       "Busca de manera resumida a los empleados con horario de guarderia del reporte final"
   )
@@ -538,35 +536,11 @@ with tab_util:
 
   st.divider()
 
-  # ---- Formato de quincena (macro 9)
-  st.subheader("Dar formato necesario a la quincena")
-  st.caption(
-      "Reacomoda las columnas del archivo de la quincena (origen A:U → destino"
-      " E:X; la columna H del origen no se copia)."
-  )
-  u9 = st.file_uploader(
-      "Excel de la quincena (Hoja1)", type=["xlsx"], key="u9_file"
-  )
-  if st.button("Dar formato", key="u9_btn", disabled=u9 is None):
-    try:
-      _guardar("u9_res", p.util_formato_quincena(u9))
-    except Exception as e:  # noqa: BLE001
-      st.error(f"No pude procesar el archivo: {e}")
-  if "u9_res" in st.session_state:
-    st.success(f"Listo: {st.session_state['u9_res'][1]} fila(s) reacomodadas.")
-    st.download_button(
-        "Descargar quincena con formato",
-        st.session_state["u9_res"][0],
-        file_name="QUINCENA_FORMATO.xlsx",
-        mime=XLSX,
-        key="u9_dl",
-    )
-
 # ----------------------------------------------------------------------------
 # PESTAÑA 3: análisis gráfico interactivo y descarga por turno (Columna T)
 # ----------------------------------------------------------------------------
 with tab_analisis:
-  st.subheader("Análisis de datos, métricas y gráficos por Turno")
+  st.subheader("📈 Análisis de datos, métricas y gráficos por Turno 📉")
   st.caption(
       "Sube tu archivo final para visualizar el desglose de la columna AA (Descr) "
       "frente a la columna AB (Tipo de Trabajador) filtrado por Turno (Columna T)."
