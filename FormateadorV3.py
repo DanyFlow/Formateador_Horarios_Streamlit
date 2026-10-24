@@ -52,7 +52,7 @@ tab_rep, tab_util, tab_analisis = st.tabs(["Generar reporte", "Utilidades", "An�
 # PESTAÑA 1: flujo principal
 # ----------------------------------------------------------------------------
 with tab_rep:
-  st.subheader("1. Dar formato a reportes de inspector PDF->EXCEL 🗂")
+  st.subheader("1. Dar formato a reportes de inspector PDF->EXCEL 📚")
   st.caption(
       "Reportes de Inspector en Excel (.xlsx, Hoja1). El export de MySQL puede"
       " ser .csv o .xlsx. Sin el reporte EN FIRMA se trabaja solo con el"
