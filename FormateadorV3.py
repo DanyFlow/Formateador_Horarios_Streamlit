@@ -458,48 +458,8 @@ with tab_util:
 
   st.divider()
 
-  
-
-  # ---- Obtener personal en firma (macro 2)
-  st.subheader("6 - Obtener personal EN FIRMA 🪪")
-  st.caption(
-      "Cruza el personal inactivo del sistema (export de MySQL) con la"
-      " quincena. La lista resultante es la que hay que agregar a mano en el"
-      " reporte de Inspector (con «mostrar empleados inactivos»)."
-  )
-  u2a = st.file_uploader(
-      "Export de MySQL del personal inactivo (tarjeta en la columna A)",
-      type=["csv", "xlsx"],
-      key="u2_todos",
-  )
-  u2b = st.file_uploader(
-      "Archivo de la quincena (Hoja1)", type=["xlsx"], key="u2_quin"
-  )
-  if st.button(
-      "Obtener personal en firma", key="u2_btn", disabled=not (u2a and u2b)
-  ):
-    try:
-      _guardar("u2_res", p.util_personal_en_firma(u2a, u2b))
-    except ValueError as e:
-      st.error(str(e))
-    except Exception as e:  # noqa: BLE001
-      st.error(f"No pude procesar los archivos: {e}")
-  if "u2_res" in st.session_state:
-    bytes2, vista2 = st.session_state["u2_res"]
-    st.success(f"{len(vista2)} persona(s) inactivas con pago en la quincena.")
-    st.dataframe(vista2, hide_index=True)
-    st.download_button(
-        "Descargar lista EN FIRMA",
-        bytes2,
-        file_name="EN_FIRMA.xlsx",
-        mime=XLSX,
-        key="u2_dl",
-    )
-
-  st.divider()
-
   # ---- Buscar «gua» (macro 8)
-  st.subheader("7 - Buscar personal con horario Guarderia 🏡")
+  st.subheader("6 - Buscar personal con horario Guarderia 🏡")
   st.caption(
       "Busca de manera resumida a los empleados con horario de guarderia del reporte final"
   )
