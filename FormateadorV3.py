@@ -37,7 +37,7 @@ def limpiar_todo():
 
 
 c_tit, c_lim = st.columns([6, 1], vertical_alignment="center")
-c_tit.title("Reporte de horarios del personal 👤📖👤")
+c_tit.title("Reporte de horarios del personal 👤📖📥")
 c_lim.button(
     "🧹 Limpiar",
     on_click=limpiar_todo,
