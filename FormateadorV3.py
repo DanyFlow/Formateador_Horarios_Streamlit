@@ -217,7 +217,7 @@ def _guardar(clave_estado, valor):
 
 with tab_util:
   # ---- Corrector de conversión Nitro (PDF -> Excel)
-  st.subheader("1 - Corregir salto de página en conversión Nitro (PDF → Excel)")
+  st.subheader("1 - Corregir salto de página en conversión Nitro (PDF → Excel) 📝")
   st.caption(
       "Sincroniza los empleados del PDF original con el Excel convertido por"
       " Nitro, reinsertando únicamente la primera línea de empleado omitida en"
@@ -254,7 +254,7 @@ with tab_util:
 
   st.divider()
       # ---- Agrupar empleados por tipo de horario
-  st.subheader("2 - Agrupar empleados por tipo de horario")
+  st.subheader("2 - Agrupar empleados por tipo de horario 👥")
   st.caption(
       "Sube el reporte final. Junta a los empleados con el mismo horario"
       " (columnas J a U) en un archivo nuevo con una sola hoja (AGRUPADO): copia"
@@ -302,7 +302,7 @@ with tab_util:
   st.divider()
 
 # ---- Filtrar archivo final por quincenas
-  st.subheader("3 - Filtrar archivo final por pago en quincenas")
+  st.subheader("3 - Filtrar archivo final por pago en quincenas 🗂️")
   st.caption(
       "Compara el archivo generado en el pasoa anterior con los trabajadores activos en la quincena a subir, con la opcion de subir una segunda quincena para descartar trabajadores que no aparezcan por encontrarse en descanso olbigatorio"
   )
@@ -335,7 +335,7 @@ with tab_util:
     )
 
   # ---- Agrupar por tipo de horario (Y) y UR (I)
-  st.subheader("4 - Agrupar por tipo de horario y UR")
+  st.subheader("4 - Agrupar por tipo de horario y UR 🗃️")
   st.caption(
       "Sube el reporte final ya agrupado por tipo de horario y re ordena de acuerdo a UR y Horario con 2 opciones de descarga distintas"
   )
@@ -420,7 +420,7 @@ with tab_util:
   st.divider()
 
   # ---- Filtrar archivo final por tarjetas específicas
-  st.subheader("5 - Filtrar archivo final por lista de tarjetas")
+  st.subheader("5 - Filtrar archivo final por lista de tarjetas 📑")
   st.caption(
       "Sube el reporte final e ingresa las tarjetas de los empleados que deseas "
       "extraer separadas por comas (ejemplo: 1023, 1024, 1050). Se generará un nuevo "
@@ -461,7 +461,7 @@ with tab_util:
   
 
   # ---- Obtener personal en firma (macro 2)
-  st.subheader("6 - Obtener personal EN FIRMA")
+  st.subheader("6 - Obtener personal EN FIRMA 🪪")
   st.caption(
       "Cruza el personal inactivo del sistema (export de MySQL) con la"
       " quincena. La lista resultante es la que hay que agregar a mano en el"
@@ -499,7 +499,7 @@ with tab_util:
   st.divider()
 
   # ---- Buscar «gua» (macro 8)
-  st.subheader("7 - Buscar personal con horario Guarderia")
+  st.subheader("7 - Buscar personal con horario Guarderia 🏡")
   st.caption(
       "Busca de manera resumida a los empleados con horario de guarderia del reporte final"
   )
