@@ -342,7 +342,7 @@ with tab_util:
       "Sube el reporte final ya agrupado por tipo de horario y re ordena de acuerdo a UR y Horario"
   )
   u_ur = st.file_uploader(
-      "Reporte final agrupado (columna Y = TIPO DE HORARIO)",
+      "Opción 1 - Reporte final agrupado (columna Y = TIPO DE HORARIO)",
       type=["xlsx"],
       key="u_ur_file",
   )
