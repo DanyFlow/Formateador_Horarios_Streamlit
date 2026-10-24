@@ -253,43 +253,7 @@ with tab_util:
     )
 
   st.divider()
-
-# ---- Filtrar archivo final por quincenas
-  st.subheader("Filtrar archivo final por pago en quincenas")
-  st.caption(
-      "Compara la columna B del archivo final contra la columna A de la Quincena 1 y, "
-      "si se proporciona, contra la Quincena 2. Genera un nuevo archivo con sus formatos "
-      "originales omitiendo a los empleados que no aparezcan en las quincenas."
-  )
-  uf_q1 = st.file_uploader("Archivo de Quincena 1 (Hoja1)", type=["xlsx"], key="uf_q1")
-  uf_q2 = st.file_uploader("Archivo de Quincena 2 (Hoja1) — opcional", type=["xlsx"], key="uf_q2")
-  uf_fin = st.file_uploader("Archivo Final o Agrupado", type=["xlsx"], key="uf_fin")
-
-  if st.button("Filtrar por quincenas", key="uf_btn", disabled=not (uf_q1 and uf_fin)):
-    try:
-      with st.spinner("Procesando y filtrando registros..."):
-        bytes_uf, copiadas, total = p.util_filtrar_por_quincenas(uf_q1, uf_q2, uf_fin)
-        _guardar("uf_res", (bytes_uf, copiadas, total))
-    except ValueError as e:
-      st.error(str(e))
-    except Exception as e:
-      st.error(f"No pude procesar los archivos: {e}")
-
-  if "uf_res" in st.session_state:
-    bytes_uf, copiadas, total = st.session_state["uf_res"]
-    st.success(
-        f"¡Filtrado completado con éxito! Se conservaron {copiadas} de {total} empleados "
-        f"(se omitieron {total - copiadas} registros sin coincidencia en las quincenas)."
-    )
-    st.download_button(
-        "Descargar archivo filtrado",
-        bytes_uf,
-        file_name="REPORTE_FILTRADO_QUINCENAS.xlsx",
-        mime=XLSX,
-        key="uf_dl",
-    )
-
-  # ---- Agrupar empleados por tipo de horario
+      # ---- Agrupar empleados por tipo de horario
   st.subheader("Agrupar empleados por tipo de horario")
   st.caption(
       "Sube el reporte final. Junta a los empleados con el mismo horario"
@@ -337,15 +301,47 @@ with tab_util:
 
   st.divider()
 
+# ---- Filtrar archivo final por quincenas
+  st.subheader("Filtrar archivo final por pago en quincenas")
+  st.caption(
+      "Compara la columna B del archivo final contra la columna A de la Quincena 1 y, "
+      "si se proporciona, contra la Quincena 2. Genera un nuevo archivo con sus formatos "
+      "originales omitiendo a los empleados que no aparezcan en las quincenas."
+  )
+  uf_q1 = st.file_uploader("Archivo de Quincena 1 (Hoja1)", type=["xlsx"], key="uf_q1")
+  uf_q2 = st.file_uploader("Archivo de Quincena 2 (Hoja1) — opcional", type=["xlsx"], key="uf_q2")
+  uf_fin = st.file_uploader("Archivo Final o Agrupado", type=["xlsx"], key="uf_fin")
+
+  if st.button("Filtrar por quincenas", key="uf_btn", disabled=not (uf_q1 and uf_fin)):
+    try:
+      with st.spinner("Procesando y filtrando registros..."):
+        bytes_uf, copiadas, total = p.util_filtrar_por_quincenas(uf_q1, uf_q2, uf_fin)
+        _guardar("uf_res", (bytes_uf, copiadas, total))
+    except ValueError as e:
+      st.error(str(e))
+    except Exception as e:
+      st.error(f"No pude procesar los archivos: {e}")
+
+  if "uf_res" in st.session_state:
+    bytes_uf, copiadas, total = st.session_state["uf_res"]
+    st.success(
+        f"¡Filtrado completado con éxito! Se conservaron {copiadas} de {total} empleados "
+        f"(se omitieron {total - copiadas} registros sin coincidencia en las quincenas)."
+    )
+    st.download_button(
+        "Descargar archivo filtrado",
+        bytes_uf,
+        file_name="REPORTE_FILTRADO_QUINCENAS.xlsx",
+        mime=XLSX,
+        key="uf_dl",
+    )
+
+     st.divider()
+
   # ---- Agrupar por tipo de horario (Y) y UR (I)
   st.subheader("Agrupar por tipo de horario y UR")
   st.caption(
-      "Sube el reporte final ya agrupado por tipo de horario (con la columna Y"
-      " llena). En la columna I escribe el encabezado «UR» (sobrescribe el"
-      " existente) y, en cada fila, los 3 primeros caracteres de la columna G;"
-      " si G contiene FOR, FO2 o FO3, la UR es solo ese código. Después agrupa"
-      " todo el documento por tipo de horario (Y) y UR (I) en un archivo nuevo."
-      " Solo reordena y cambia la columna I."
+      "Sube el reporte final ya agrupado por tipo de horario y re ordena de acuerdo a UR y Horario"
   )
   u_ur = st.file_uploader(
       "Reporte final agrupado (columna Y = TIPO DE HORARIO)",
@@ -386,12 +382,7 @@ with tab_util:
   st.markdown("---")
   st.markdown(
       "**Opción 2 — Varias pestañas (tipo general + UR)**  \n"
-      "Unifica las variantes numeradas y de tolerancia (BASIFICADOS / "
-      "EVENTUALES / …). Ejemplo: «MATUTINO LUNES A VIERNES BASIFICADOS 1» y "
-      "«… EVENTUALES 3» se convierten en **MATUTINO LUNES A VIERNES**.  \n"
-      "Todo lo irregular o vacío va a una sola pestaña **REVISAR**.  \n"
-      "Orden: Matutino → Vespertino → Nocturno → Jornada acumulada diurna → "
-      "Jornada acumulada nocturna → REVISAR. Incluye hoja **ÍNDICE** con enlaces."
+      "Unifica las variantes numeradas y de tolerancia "
   )
   if st.button(
       "Agrupar por tipo general + UR (varias pestañas)",
