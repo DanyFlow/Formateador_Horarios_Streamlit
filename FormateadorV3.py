@@ -302,7 +302,7 @@ with tab_util:
   st.divider()
 
 # ---- Filtrar archivo final por quincenas
-  st.subheader("3 - Filtrar archivo final por pago en quincenas 🗂️")
+  st.subheader("3 - Filtrar personal activo en quincena 🗂️")
   st.caption(
       "Compara el archivo generado en el pasoa anterior con los trabajadores activos en la quincena a subir, con la opcion de subir una segunda quincena para descartar trabajadores que no aparezcan por encontrarse en descanso olbigatorio"
   )
