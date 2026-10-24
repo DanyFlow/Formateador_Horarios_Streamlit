@@ -336,8 +336,6 @@ with tab_util:
         key="uf_dl",
     )
 
-     st.divider()
-
   # ---- Agrupar por tipo de horario (Y) y UR (I)
   st.subheader("Agrupar por tipo de horario y UR")
   st.caption(
