@@ -52,7 +52,7 @@ tab_rep, tab_util, tab_analisis = st.tabs(["Generar reporte", "Utilidades", "An�
 # PESTAÑA 1: flujo principal
 # ----------------------------------------------------------------------------
 with tab_rep:
-  st.subheader("1. Dar formato a reportes de inspector PDF->EXCEL 📚")
+  st.subheader("1 - Dar formato a reportes de inspector PDF->EXCEL 📚")
   st.caption(
       "Reportes de Inspector en Excel (.xlsx, Hoja1). El export de MySQL puede"
       " ser .csv o .xlsx. Sin el reporte EN FIRMA se trabaja solo con el"
@@ -500,7 +500,7 @@ with tab_util:
 # PESTAÑA 3: análisis gráfico interactivo y descarga por turno (Columna T)
 # ----------------------------------------------------------------------------
 with tab_analisis:
-  st.subheader("Análisis de datos, métricas y gráficos por Turno 📊")
+  st.subheader("1 - Análisis de datos, métricas y gráficos por Turno 📊")
   st.caption(
       "Sube tu archivo final para visualizar el desglose de la columna AA (Descr) "
       "frente a la columna AB (Tipo de Trabajador) filtrado por Turno (Columna T)."
