@@ -680,67 +680,89 @@ with tab_analisis:
     st.subheader("1 - Análisis de datos, métricas y gráficos por Turno 📊")
     st.caption(
         "Sube tu archivo final para visualizar el desglose de la columna AA (Descr) "
-        "frente al Grupo de Empleado (Columna I o equivalente) filtrado por Turno (Columna T)."
+        "frente al Grupo de Empleado filtrado por Turno o de forma consolidada."
     )
 
     u_ana = st.file_uploader("Sube tu archivo para análisis", type=["xlsx"], key="u_ana_file")
 
     if u_ana is not None:
         try:
-            # CAMBIO 1: Recibimos c_grupo en lugar de c_tipotrab (asegúrate de que tu función p.util_analizar_reporte devuelva la columna del grupo)
             df_ana, c_turno, c_descr, c_grupo = p.util_analizar_reporte(u_ana)
             st.success(f"¡Archivo cargado con éxito! {len(df_ana)} registros procesados.")
 
             # Métricas generales arriba
             m1, m2, m3 = st.columns(3)
             m1.metric("Total de Registros", len(df_ana))
-            turnos_unicos = sorted(df_ana[c_turno].dropna().astype(str).unique())
-            m2.metric("Turnos Detectados (Col. T)", len(turnos_unicos))
+            
+            # Obtenemos los turnos únicos y agregamos "TODOS" al inicio
+            turnos_raw = sorted(df_ana[c_turno].dropna().astype(str).unique())
+            turnos_unicos = ["TODOS"] + turnos_raw
+
+            m2.metric("Turnos Detectados (Col. T)", len(turnos_raw))
             m3.metric("Descripciones Únicas (Col. AA)", df_ana[c_descr].dropna().nunique())
 
             st.divider()
 
-            # Selector de Turno (Columna T)
-            st.subheader("Desglose interactivo por Turno")
-            turno_sel = st.selectbox("Selecciona el Turno (Columna T):", options=turnos_unicos, key="sel_turno_ana")
+            # Selector de Turno con botones visibles (incluyendo TODOS)
+            st.subheader("Desglose interactivo por Turno o Consolidado")
+            
+            if "turno_seleccionado_ana" not in st.session_state:
+                st.session_state["turno_seleccionado_ana"] = "TODOS"
+
+            cols_botones = st.columns(min(len(turnos_unicos), 5))
+            for idx, t_val in enumerate(turnos_unicos):
+                col_actual = cols_botones[idx % len(cols_botones)]
+                es_activo = (st.session_state["turno_seleccionado_ana"] == t_val)
+                tipo_boton = "primary" if es_activo else "secondary"
+                
+                # Etiqueta especial para el botón de todos
+                label_btn = "🌐 Todos" if t_val == "TODOS" else f"Turno: {t_val}"
+                
+                if col_actual.button(label_btn, key=f"btn_turno_{t_val}", type=tipo_boton, use_container_width=True):
+                    st.session_state["turno_seleccionado_ana"] = t_val
+                    st.rerun()
+
+            turno_sel = st.session_state["turno_seleccionado_ana"]
 
             if turno_sel:
-                df_turno = df_ana[df_ana[c_turno].astype(str) == str(turno_sel)]
+                # Si se selecciona TODOS, usamos todo el dataframe. Si no, filtramos por el turno.
+                if turno_sel == "TODOS":
+                    df_turno = df_ana
+                    titulo_filtro = "Todos los Turnos (Consolidado)"
+                else:
+                    df_turno = df_ana[df_ana[c_turno].astype(str) == str(turno_sel)]
+                    titulo_filtro = f"Turno: {turno_sel}"
 
-                # CAMBIO 2: Agrupamos por la Descripción (AA) y el Grupo de Empleado
+                # Agrupación por Descripción (AA) y Grupo
                 tabla_resumen = df_turno.groupby([c_descr, c_grupo]).size().reset_index(name="CANTIDAD")
 
-                st.markdown(f"**Registros para el turno `{turno_sel}`** ({len(df_turno)} empleados en total):")
+                st.markdown(f"**Registros para `{titulo_filtro}`** ({len(df_turno)} empleados en total):")
                 st.dataframe(tabla_resumen, hide_index=True)
 
-                # Gráfico interactivo completo con Plotly Express
                 if not tabla_resumen.empty:
-                    st.markdown("##### 📊 Distribución por Descripción (AA) y Grupo de Empleado")
+                    st.markdown(f"##### 📊 Distribución por Descripción (AA) y Grupo de Empleado ({titulo_filtro})")
                     
-                    # Calculamos un alto dinámico para que siempre haya espacio suficiente si hay muchas categorías
                     num_categorias = tabla_resumen[c_descr].nunique()
                     alto_grafico = max(450, num_categorias * 35)
 
-                    # Gráfico de barras horizontales (evita que los nombres largos de la columna AA se corten)
                     fig = px.bar(
                         tabla_resumen,
                         y=c_descr,
                         x="CANTIDAD",
-                        color=c_grupo, # CAMBIO 3: El color de las barras ahora se divide por el Grupo de Empleado
+                        color=c_grupo,
                         orientation="h",
-                        title=f"Desglose de personal - Turno: {turno_sel}",
+                        title=f"Desglose de personal - {titulo_filtro}",
                         labels={
                             c_descr: "Descripción (Columna AA)",
                             "CANTIDAD": "Número de Empleados",
                             c_grupo: "Grupo de Empleado"
                         },
-                        text="CANTIDAD" # Muestra la cifra exacta sobre/dentro de cada barra
+                        text="CANTIDAD"
                     )
 
-                    # Personalización visual de ejes, márgenes y leyenda
                     fig.update_layout(
                         height=alto_grafico,
-                        yaxis={'categoryorder': 'total ascending'}, # Ordena de mayor a menor cantidad
+                        yaxis={'categoryorder': 'total ascending'},
                         xaxis_title="Número de Empleados",
                         yaxis_title="Descripción (Columna AA)",
                         legend_title_text="Grupo de Empleado",
@@ -753,15 +775,18 @@ with tab_analisis:
 
                 st.divider()
 
-                # Botón opcional para descargar únicamente ese turno
-                bytes_turno, n_turno = p.exportar_por_turno(df_ana, c_turno, turno_sel)
-                st.download_button(
-                    label=f"📥 Descargar reporte en Excel para el turno {turno_sel} ({n_turno} registros)",
-                    data=bytes_turno,
-                    file_name=f"REPORTE_TURNO_{str(turno_sel).replace(' ', '_')}.xlsx",
-                    mime=XLSX,
-                    key=f"dl_turno_{turno_sel}"
-                )
+                # Botón de descarga dinámico según la selección
+                if turno_sel == "TODOS":
+                    st.info("💡 Estás visualizando el consolidado global de todos los turnos. Puedes utilizar las otras pestañas para descargar el reporte completo de la base de datos.")
+                else:
+                    bytes_turno, n_turno = p.exportar_por_turno(df_ana, c_turno, turno_sel)
+                    st.download_button(
+                        label=f"📥 Descargar reporte en Excel para el turno {turno_sel} ({n_turno} registros)",
+                        data=bytes_turno,
+                        file_name=f"REPORTE_TURNO_{str(turno_sel).replace(' ', '_')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=f"dl_turno_{turno_sel}"
+                    )
 
         except Exception as e:
             st.error(f"No se pudo procesar el archivo para análisis: {e}")
