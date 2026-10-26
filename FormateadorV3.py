@@ -177,11 +177,10 @@ def _pedir_login():
         st.rerun()
       time.sleep(1)  # frena los intentos repetidos
       st.error("Usuario o contraseña incorrectos.")
-
   st.stop()
 
-_pedir_login()
 
+_pedir_login()
 
 def cerrar_sesion():
   """Cierra la sesión y borra todo lo cargado."""
