@@ -1931,7 +1931,7 @@ def util_formato_quincena(archivo):
 
 def util_analizar_reporte(archivo):
   """Analiza el reporte para extraer el Turno (Columna T / índice 19),
-  Descr (Columna AA / índice 26) y Tipo de Trabajador (Columna AB / índice 27).
+  Descr (Columna AA / índice 26) y Grupo de Empleado (Columna I / índice 8).
   """
   if hasattr(archivo, "seek"):
     archivo.seek(0)
@@ -1941,16 +1941,14 @@ def util_analizar_reporte(archivo):
   
   cols = list(df.columns)
   
-  # Búsqueda por nombre de encabezado o por posición absoluta de columna Excel (T=19, AA=26, AB=27)
   c_turno = next((c for c in cols if str(c).strip().upper() == "TURNO"), cols[19] if len(cols) > 19 else None)
   c_descr = next((c for c in cols if str(c).strip().upper() in ("DESCR", "DESCRIPCION", "DESCRIPCIÓN")), cols[26] if len(cols) > 26 else None)
-  c_tipotrab = next((c for c in cols if str(c).strip().upper() in ("NOMBRE_GRUPO", "TIPO DE TRABAJADOR", "TIPO_TRABAJADOR")), cols[27] if len(cols) > 27 else None)
+  c_grupo = next((c for c in cols if str(c).strip().upper() in ("NOMBRE_GRUPO", "GRUPO", "GRUPO_EMPLEADO")), cols[8] if len(cols) > 8 else None)
   
-  if not c_turno or not c_descr or not c_tipotrab:
-    raise ValueError("No se pudieron localizar las columnas requeridas (Turno en T, Descr en AA, Tipo de Trabajador en AB).")
+  if not c_turno or not c_descr or not c_grupo:
+    raise ValueError("No se pudieron localizar las columnas requeridas (Turno en T, Descr en AA, Grupo de Empleado en I).")
     
-  return df, c_turno, c_descr, c_tipotrab
-
+  return df, c_turno, c_descr, c_grupo
 
 def exportar_por_turno(df, col_turno, turno_seleccionado):
   """Filtra el DataFrame por un turno específico (Columna T) y genera un Excel descargable."""
