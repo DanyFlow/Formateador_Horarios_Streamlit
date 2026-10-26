@@ -1944,7 +1944,7 @@ def util_analizar_reporte(archivo):
   # Búsqueda por nombre de encabezado o por posición absoluta de columna Excel (T=19, AA=26, AB=27)
   c_turno = next((c for c in cols if str(c).strip().upper() == "TURNO"), cols[19] if len(cols) > 19 else None)
   c_descr = next((c for c in cols if str(c).strip().upper() in ("DESCR", "DESCRIPCION", "DESCRIPCIÓN")), cols[26] if len(cols) > 26 else None)
-  c_tipotrab = next((c for c in cols if str(c).strip().upper() in ("TIPOTRAB", "TIPO DE TRABAJADOR", "TIPO_TRABAJADOR")), cols[27] if len(cols) > 27 else None)
+  c_tipotrab = next((c for c in cols if str(c).strip().upper() in ("NOMBRE_GRUPO", "TIPO DE TRABAJADOR", "TIPO_TRABAJADOR")), cols[27] if len(cols) > 27 else None)
   
   if not c_turno or not c_descr or not c_tipotrab:
     raise ValueError("No se pudieron localizar las columnas requeridas (Turno en T, Descr en AA, Tipo de Trabajador en AB).")
