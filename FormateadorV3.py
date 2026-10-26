@@ -161,7 +161,7 @@ def _pedir_login():
     return
   _, centro, _ = st.columns([1, 2, 1])
   with centro:
-    st.title("Reporte de horarios del personal")
+    st.title("📲 -Control de asistencia HGO-")
     if not _cuentas():
       st.error(
           "No hay usuarios configurados. Agrega la sección [usuarios] en"
