@@ -677,93 +677,94 @@ with tab_util:
 # PESTAÑA 3: análisis gráfico interactivo y descarga por turno (Columna T)
 # ----------------------------------------------------------------------------
 with tab_analisis:
-  st.subheader("1 - Análisis de datos, métricas y gráficos por Turno 📊")
-  st.caption(
-      "Sube tu archivo final para visualizar el desglose de la columna AA (Descr) "
-      "frente a la columna AB (Tipo de Trabajador) filtrado por Turno (Columna T)."
-  )
+    st.subheader("1 - Análisis de datos, métricas y gráficos por Turno 📊")
+    st.caption(
+        "Sube tu archivo final para visualizar el desglose de la columna AA (Descr) "
+        "frente al Grupo de Empleado (Columna I o equivalente) filtrado por Turno (Columna T)."
+    )
 
-  u_ana = st.file_uploader("Sube tu archivo para análisis", type=["xlsx"], key="u_ana_file")
+    u_ana = st.file_uploader("Sube tu archivo para análisis", type=["xlsx"], key="u_ana_file")
 
-  if u_ana is not None:
-    try:
-      df_ana, c_turno, c_descr, c_tipotrab = p.util_analizar_reporte(u_ana)
-      st.success(f"¡Archivo cargado con éxito! {len(df_ana)} registros procesados.")
+    if u_ana is not None:
+        try:
+            # CAMBIO 1: Recibimos c_grupo en lugar de c_tipotrab (asegúrate de que tu función p.util_analizar_reporte devuelva la columna del grupo)
+            df_ana, c_turno, c_descr, c_grupo = p.util_analizar_reporte(u_ana)
+            st.success(f"¡Archivo cargado con éxito! {len(df_ana)} registros procesados.")
 
-      # Métricas generales arriba
-      m1, m2, m3 = st.columns(3)
-      m1.metric("Total de Registros", len(df_ana))
-      turnos_unicos = sorted(df_ana[c_turno].dropna().astype(str).unique())
-      m2.metric("Turnos Detectados (Col. T)", len(turnos_unicos))
-      m3.metric("Descripciones Únicas (Col. AA)", df_ana[c_descr].dropna().nunique())
+            # Métricas generales arriba
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Total de Registros", len(df_ana))
+            turnos_unicos = sorted(df_ana[c_turno].dropna().astype(str).unique())
+            m2.metric("Turnos Detectados (Col. T)", len(turnos_unicos))
+            m3.metric("Descripciones Únicas (Col. AA)", df_ana[c_descr].dropna().nunique())
 
-      st.divider()
+            st.divider()
 
-      # Selector de Turno (Columna T)
-      st.subheader("Desglose interactivo por Turno")
-      turno_sel = st.selectbox("Selecciona el Turno (Columna T):", options=turnos_unicos, key="sel_turno_ana")
+            # Selector de Turno (Columna T)
+            st.subheader("Desglose interactivo por Turno")
+            turno_sel = st.selectbox("Selecciona el Turno (Columna T):", options=turnos_unicos, key="sel_turno_ana")
 
-      if turno_sel:
-        df_turno = df_ana[df_ana[c_turno].astype(str) == str(turno_sel)]
+            if turno_sel:
+                df_turno = df_ana[df_ana[c_turno].astype(str) == str(turno_sel)]
 
-        # Agrupación: número de registros por Descripción (AA) y Tipo de Trabajador (AB)
-        tabla_resumen = df_turno.groupby([c_descr, c_tipotrab]).size().reset_index(name="CANTIDAD")
+                # CAMBIO 2: Agrupamos por la Descripción (AA) y el Grupo de Empleado
+                tabla_resumen = df_turno.groupby([c_descr, c_grupo]).size().reset_index(name="CANTIDAD")
 
-        st.markdown(f"**Registros para el turno `{turno_sel}`** ({len(df_turno)} empleados en total):")
-        st.dataframe(tabla_resumen, hide_index=True)
+                st.markdown(f"**Registros para el turno `{turno_sel}`** ({len(df_turno)} empleados en total):")
+                st.dataframe(tabla_resumen, hide_index=True)
 
-        # Gráfico interactivo completo con Plotly Express
-        if not tabla_resumen.empty:
-          st.markdown("##### 📊 Distribución por Descripción (AA) y Tipo de Trabajador (AB)")
-          
-          # Calculamos un alto dinámico para que siempre haya espacio suficiente si hay muchas categorías
-          num_categorias = tabla_resumen[c_descr].nunique()
-          alto_grafico = max(450, num_categorias * 35)
+                # Gráfico interactivo completo con Plotly Express
+                if not tabla_resumen.empty:
+                    st.markdown("##### 📊 Distribución por Descripción (AA) y Grupo de Empleado")
+                    
+                    # Calculamos un alto dinámico para que siempre haya espacio suficiente si hay muchas categorías
+                    num_categorias = tabla_resumen[c_descr].nunique()
+                    alto_grafico = max(450, num_categorias * 35)
 
-          # Gráfico de barras horizontales (evita que los nombres largos de la columna AA se corten)
-          fig = px.bar(
-              tabla_resumen,
-              y=c_descr,
-              x="CANTIDAD",
-              color=c_tipotrab,
-              orientation="h",
-              title=f"Desglose de personal - Turno: {turno_sel}",
-              labels={
-                  c_descr: "Descripción (Columna AA)",
-                  "CANTIDAD": "Número de Empleados",
-                  c_tipotrab: "Tipo de Trabajador (Columna AB)"
-              },
-              text="CANTIDAD" # Muestra la cifra exacta sobre/dentro de cada barra
-          )
+                    # Gráfico de barras horizontales (evita que los nombres largos de la columna AA se corten)
+                    fig = px.bar(
+                        tabla_resumen,
+                        y=c_descr,
+                        x="CANTIDAD",
+                        color=c_grupo, # CAMBIO 3: El color de las barras ahora se divide por el Grupo de Empleado
+                        orientation="h",
+                        title=f"Desglose de personal - Turno: {turno_sel}",
+                        labels={
+                            c_descr: "Descripción (Columna AA)",
+                            "CANTIDAD": "Número de Empleados",
+                            c_grupo: "Grupo de Empleado"
+                        },
+                        text="CANTIDAD" # Muestra la cifra exacta sobre/dentro de cada barra
+                    )
 
-          # Personalización visual de ejes, márgenes y leyenda
-          fig.update_layout(
-              height=alto_grafico,
-              yaxis={'categoryorder': 'total ascending'}, # Ordena de mayor a menor cantidad
-              xaxis_title="Número de Empleados",
-              yaxis_title="Descripción (Columna AA)",
-              legend_title_text="Tipo de Trabajador",
-              margin=dict(l=20, r=20, t=50, b=50),
-              hovermode="closest"
-          )
-          fig.update_traces(textposition="outside")
+                    # Personalización visual de ejes, márgenes y leyenda
+                    fig.update_layout(
+                        height=alto_grafico,
+                        yaxis={'categoryorder': 'total ascending'}, # Ordena de mayor a menor cantidad
+                        xaxis_title="Número de Empleados",
+                        yaxis_title="Descripción (Columna AA)",
+                        legend_title_text="Grupo de Empleado",
+                        margin=dict(l=20, r=20, t=50, b=50),
+                        hovermode="closest"
+                    )
+                    fig.update_traces(textposition="outside")
 
-          st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True)
 
-        st.divider()
+                st.divider()
 
-        # Botón opcional para descargar únicamente ese turno
-        bytes_turno, n_turno = p.exportar_por_turno(df_ana, c_turno, turno_sel)
-        st.download_button(
-            label=f"📥 Descargar reporte en Excel para el turno {turno_sel} ({n_turno} registros)",
-            data=bytes_turno,
-            file_name=f"REPORTE_TURNO_{str(turno_sel).replace(' ', '_')}.xlsx",
-            mime=XLSX,
-            key=f"dl_turno_{turno_sel}"
-        )
+                # Botón opcional para descargar únicamente ese turno
+                bytes_turno, n_turno = p.exportar_por_turno(df_ana, c_turno, turno_sel)
+                st.download_button(
+                    label=f"📥 Descargar reporte en Excel para el turno {turno_sel} ({n_turno} registros)",
+                    data=bytes_turno,
+                    file_name=f"REPORTE_TURNO_{str(turno_sel).replace(' ', '_')}.xlsx",
+                    mime=XLSX,
+                    key=f"dl_turno_{turno_sel}"
+                )
 
-    except Exception as e:
-      st.error(f"No se pudo procesar el archivo para análisis: {e}")
+        except Exception as e:
+            st.error(f"No se pudo procesar el archivo para análisis: {e}")
 
 # ------- Firma flotante (también se muestra en la pantalla de login)
 _mostrar_firma()
