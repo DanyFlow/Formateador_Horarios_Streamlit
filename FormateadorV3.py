@@ -26,7 +26,7 @@ st.set_page_config(
 )
 
 
-# ------- Firma flotante en la esquina superior izquierda
+# ------- Definición de la Firma flotante
 url_imagen_drive = "https://i.redd.it/snoovatar/avatars/98e5bfa6-95f3-46d8-8754-7a64c0099533.png"
 enlace_perfil = "https://share.streamlit.io/user/danyflow"
 
@@ -113,10 +113,11 @@ firma_html = f"""
 </a>
 """
 
-
 def _mostrar_firma():
-  st.markdown(firma_html, unsafe_allow_html=True)
+    st.markdown(firma_html, unsafe_allow_html=True)
 
+# Llama a la firma AQUÍ para que se pinte ANTES del stop de login
+_mostrar_firma()
 
 # ----------------------------------------------------------------------------
 # LOGIN (2 usuarios, sin base de datos)
