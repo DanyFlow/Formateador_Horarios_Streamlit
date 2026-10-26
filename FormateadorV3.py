@@ -178,12 +178,6 @@ def _pedir_login():
       time.sleep(1)  # frena los intentos repetidos
       st.error("Usuario o contraseña incorrectos.")
 
-    # Recuadro de contacto con el administrador (Correo + WhatsApp)
-    st.markdown("---")
-    st.markdown(
-        """
-        """,
-    )
   st.stop()
 
 _pedir_login()
