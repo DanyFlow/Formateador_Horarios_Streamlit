@@ -186,12 +186,12 @@ def _pedir_login():
             <p style="margin: 0; font-size: 14px; font-weight: 600; color: inherit;">¿Problemas de acceso o requieres una cuenta?</p>
             <p style="margin: 8px 0 4px 0; font-size: 13px;">
                 📧 <a href="mailto:daniel.informatica.hgo@gmail.com" style="color: #06b6d4; text-decoration: none; font-weight: bold;">daniel.informatica.hgo@gmail.com</a>
+            </p>
         </div>
         """,
         unsafe_allow_html=True
     )
   st.stop()
-
 
 _pedir_login()
 
