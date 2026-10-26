@@ -180,19 +180,7 @@ def _pedir_login():
       st.error("Usuario o contraseña incorrectos.")
 
     # Recuadro de contacto con el administrador (Correo + WhatsApp)
-    st.markdown("---")
-    st.markdown(
-        """
-        <div style="padding: 14px; border-radius: 8px; background-color: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.3); text-align: center;">
-            <p style="margin: 0; font-size: 14px; font-weight: 600; color: inherit;">¿Problemas de acceso o requieres una cuenta?</p>
-            <p style="margin: 8px 0 4px 0; font-size: 13px;">
-                📧 <a href="mailto:daniel.informatica.hgo@gmail.com" style="color: #06b6d4; text-decoration: none; font-weight: bold;">daniel.informatica.hgo@gmail.com</a>
-            </p>
-            <p style="margin: 0; font-size: 13px;">
-                💬 <a href="https://wa.me/523334557325?text=Hola%20Daniel,%20necesito%20soporte%20con%20el%20sistema%20de%20horarios" target="_blank" style="color: #22c55e; text-decoration: none; font-weight: bold;">Enviar WhatsApp de asistencia</a>
-            </p>
-        </div>
-        """,
+
         unsafe_allow_html=True
     )
   st.stop()
