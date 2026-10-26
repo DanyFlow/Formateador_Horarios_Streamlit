@@ -179,10 +179,7 @@ def _pedir_login():
       time.sleep(1)  # frena los intentos repetidos
       st.error("Usuario o contraseña incorrectos.")
 
-    # Recuadro de contacto con el administrador (Correo + WhatsApp)
 
-        unsafe_allow_html=True
-    )
   st.stop()
 
 
