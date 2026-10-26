@@ -104,7 +104,7 @@ firma_html = f"""
 
 <a href="{enlace_perfil}" target="_blank" class="firma-flotante-link" title="Visitar perfil de Streamlit">
     <div class="firma-flotante">
-        <img src="{url_imagen_drive}" alt="Dany FloVel">
+        <img src="{url_imagen_drive}" alt="By Dany FloVel">
         <div class="firma-texto">
             <span class="firma-titulo">Dany FloVel</span>
             <span class="firma-sub">⚡ Ver perfil ⚡</span>
