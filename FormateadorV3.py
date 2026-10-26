@@ -158,7 +158,6 @@ def _pedir_login():
   """Muestra el formulario y detiene la app si no hay sesión iniciada."""
   if st.session_state.get(_CLAVE_AUTH):
     return
-  _mostrar_firma()
   _, centro, _ = st.columns([1, 2, 1])
   with centro:
     st.title("Reporte de horarios del personal")
@@ -169,8 +168,8 @@ def _pedir_login():
       )
       st.stop()
     with st.form("login"):
-      usuario = st.text_input("Usuario 🧑‍💻")
-      password = st.text_input("Contraseña 🔒", type="password")
+      usuario = st.text_input("Usuario")
+      password = st.text_input("Contraseña", type="password")
       enviar = st.form_submit_button("Entrar", use_container_width=True)
     if enviar:
       if _verificar(usuario, password):
@@ -178,6 +177,20 @@ def _pedir_login():
         st.rerun()
       time.sleep(1)  # frena los intentos repetidos
       st.error("Usuario o contraseña incorrectos.")
+
+    # Recuadro de contacto con el administrador
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style="padding: 12px; border-radius: 8px; background-color: rgba(6, 182, 212, 0.1); border: 1px solid rgba(6, 182, 212, 0.3); text-align: center;">
+            <p style="margin: 0; font-size: 14px; font-weight: 600; color: inherit;">¿Problemas para acceder o requieres una cuenta?</p>
+            <p style="margin: 4px 0 0 0; font-size: 13px;">
+                📧 Contacta al administrador: <a href="mailto:daniel.informatica.hgo@gmail.com" style="color: #06b6d4; text-decoration: none; font-weight: bold;">daniel.informatica.hgo@gmail.com</a>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
   st.stop()
 
 
